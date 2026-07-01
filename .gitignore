@@ -1,0 +1,25 @@
+# ─── Secrets & environment (NEVER commit these) ───
+# Real API keys, OAuth secrets, DB connection strings live in .env files.
+# Committing one leaks it forever in git history. .env.example (a template
+# with placeholder values) is safe to commit — hence the exception below.
+.env
+.env.*
+!.env.example
+
+# ─── Python / backend ───
+backend/.venv/
+__pycache__/
+*.pyc
+
+# ─── Node / frontend ───
+frontend/node_modules/
+frontend/dist/
+
+# ─── Vercel ───
+.vercel/
+
+# ─── OS / editor cruft ───
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

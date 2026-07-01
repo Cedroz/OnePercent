@@ -8,6 +8,14 @@ app = FastAPI()
 
 # This decorator registers a route: "when a GET request hits /health, run this function."
 # The function's return value gets automatically converted to JSON.
+@app.get("/")
+def home():
+    return {"status": "ok"}
+
 @app.get("/health")
 def health():
+    return {"status": "ok"}
+
+@app.get("/ping")
+def ping():
     return {"status": "ok"}

@@ -16,7 +16,7 @@ allowed_origins = [
     "http://127.0.0.1:5173",   # same server, other spelling of localhost
     "http://localhost:5174",   # Vite falls back here if 5173 is taken
     "http://127.0.0.1:5174",
-    # Later, at deploy time, we'll add the live Vercel frontend URL here.
+    "https://one-percent-frontend.vercel.app",   # live Vercel frontend (production)
 ]
 
 app.add_middleware(

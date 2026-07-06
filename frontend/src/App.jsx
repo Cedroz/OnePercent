@@ -1,34 +1,78 @@
 import { useState, useEffect } from 'react'
 
-// Read the backend URL from the environment (see .env.local).
-// import.meta.env is how Vite exposes VITE_* vars to browser code.
-const API_URL = import.meta.env.VITE_API_URL
+// In dev this is empty → relative URLs like "/api/me" (Vite proxies them).
+// In production it's the full backend URL (set in Vercel).
+const API_URL = import.meta.env.VITE_API_URL || ''
 
 function App() {
-  // useState creates a piece of "state": a value React watches. When you call
-  // the setter (setStatus), React re-runs this component and updates the screen.
-  // We track two things: the fetched status text, and any error message.
-  const [status, setStatus] = useState('loading…')
-  const [error, setError] = useState(null)
+  const [user, setUser] = useState(null)      // null = not logged in (or not checked yet)
+  const [commits, setCommits] = useState([])
+  const [loading, setLoading] = useState(true)
 
-  // useEffect runs code AFTER the component first renders — the right place for
-  // side effects like network calls. The empty array [] at the end means
-  // "run this once on mount, never again."
+  // On first load, ask the backend "who am I?". The session cookie is sent
+  // because of `credentials: 'include'` (without it, the browser omits cookies
+  // on cross-origin requests). 200 → logged in; 401 → show the login button.
   useEffect(() => {
-    fetch(`${API_URL}/health`)              // call the backend
-      .then((res) => res.json())            // parse the JSON body
-      .then((data) => setStatus(data.status)) // store it in state → screen updates
-      .catch((err) => setError(err.message)) // network/CORS failure lands here
+    fetch(`${API_URL}/api/me`, { credentials: 'include' })
+      .then((res) => {
+        if (!res.ok) throw new Error('not logged in')  // turns 401 into a caught error
+        return res.json()
+      })
+      .then((me) => {
+        setUser(me)
+        // Logged in — now go fetch the commits.
+        return fetch(`${API_URL}/api/commits`, { credentials: 'include' })
+      })
+      .then((res) => res.json())
+      .then((data) => setCommits(data.commits))
+      .catch(() => setUser(null))     // not logged in — perfectly fine, show login
+      .finally(() => setLoading(false))
   }, [])
 
+  if (loading) return <p style={{ padding: '2rem' }}>Loading…</p>
+
   return (
-    <div style={{ fontFamily: 'sans-serif', padding: '2rem' }}>
+    <div style={{ fontFamily: 'sans-serif', padding: '2rem', maxWidth: 720, margin: '0 auto' }}>
       <h1>OnePercent</h1>
-      <p>Backend URL: <code>{API_URL}</code></p>
-      {error ? (
-        <p style={{ color: 'crimson' }}>Error talking to backend: {error}</p>
+
+      {!user ? (
+        // A plain link (full-page navigation), NOT a fetch — OAuth needs the
+        // browser to actually travel to GitHub and back, setting cookies en route.
+        <a href={`${API_URL}/auth/login`}>
+          <button style={{ padding: '0.6rem 1rem', fontSize: '1rem' }}>
+            Login with GitHub
+          </button>
+        </a>
       ) : (
-        <p>Backend health: <strong>{status}</strong></p>
+        <>
+          <p>
+            {user.avatar_url && (
+              <img
+                src={user.avatar_url}
+                width="32"
+                height="32"
+                style={{ borderRadius: '50%', verticalAlign: 'middle', marginRight: 8 }}
+              />
+            )}
+            Logged in as <strong>{user.login}</strong>
+          </p>
+
+          <h2>Recent commits</h2>
+          {commits.length === 0 ? (
+            <p>No recent commits found.</p>
+          ) : (
+            <ul style={{ lineHeight: 1.7 }}>
+              {/* .map() turns each commit object into an <li>. React needs a
+                  unique `key` per item to track them efficiently. */}
+              {commits.map((c) => (
+                <li key={c.repo + c.sha}>
+                  <code>{c.sha}</code> — {c.message}{' '}
+                  <em style={{ color: '#888' }}>({c.repo})</em>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
       )}
     </div>
   )

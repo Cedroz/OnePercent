@@ -4,3 +4,5 @@ authlib
 httpx
 python-dotenv
 itsdangerous
+sqlmodel
+psycopg2-binary

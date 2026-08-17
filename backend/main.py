@@ -182,3 +182,22 @@ async def commits(request: Request):
             })
 
     return {"login": login, "commits": result[:20]}
+
+@app.get("/api/repos")
+async def get_repos(request: Request):
+    token = require_login(request)
+    profile = (await oauth.github.get("user", token=token)).json()
+    login = profile["login"]
+    repos = (await oauth.github.get(
+    f"users/{login}/repos?sort=pushed&per_page=100", token=token
+    )).json()
+    result = []
+    for repo in repos if isinstance(repos, list) else []:
+        full_name = repo.get("full_name")
+        if not full_name:
+            continue
+        result.append({
+            "repo": full_name,
+            "description": repo.get("description"),
+        })
+    return result

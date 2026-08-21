@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 from authlib.integrations.starlette_client import OAuth
+from database import save_user, get_user
 
 # Load variables from backend/.env into the environment (local dev only;
 # in production, Vercel injects these from its dashboard instead).
@@ -64,12 +65,6 @@ oauth.register(
     client_kwargs={"scope": "read:user"},                           # what we're asking permission for
 )
 
-# TEMPORARY in-memory token store (Phase 1 only). Maps GitHub user id -> token.
-# This is wiped on restart and does NOT work on serverless (no shared memory
-# between requests) — we replace it with the encrypted DB store in Phase 2.
-# Good enough for local dev right now.
-TOKENS = {}
-
 # Where to send the user after a successful login. Defaults to the local Vite
 # dev server; overridable via env var for production.
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
@@ -119,7 +114,7 @@ async def callback(request: Request):
 
     github_id = profile["id"]
     # Store the token SERVER-SIDE, keyed by GitHub id. It never goes to the browser.
-    TOKENS[github_id] = token
+    save_user(github_id, token["access_token"])
     # Remember who this browser is: put the (non-secret) user id in the signed cookie.
     request.session["user_id"] = github_id
 
@@ -131,9 +126,11 @@ async def callback(request: Request):
 # Any endpoint that needs GitHub access calls this first.
 def require_login(request: Request):
     user_id = request.session.get("user_id")
-    if user_id is None or user_id not in TOKENS:
+    user = get_user(user_id)
+    if user_id is None or user is None:
         raise HTTPException(status_code=401, detail="Not logged in")
-    return TOKENS[user_id]
+    return {"access_token": user.github_token, "token_type": "bearer"}
+
 
 
 # Who is logged in? The frontend calls this to know whether to show a login

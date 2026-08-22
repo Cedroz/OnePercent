@@ -1,4 +1,5 @@
 import os
+import time
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
@@ -6,13 +7,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 from authlib.integrations.starlette_client import OAuth
-from database import save_user, get_user
+from database import save_user, get_user, save_leetcode_stats, set_leetcode_username
 from pydantic import BaseModel
-from database import save_user, get_user, set_leetcode_username   # add set_leetcode_username
 from leetcode import fetch_leetcode_stats
+from crypto import decrypt_token
 
 class LeetCodeUsername(BaseModel):
     username: str
+
+# Refetch LeetCode only if the cached data is older than this (seconds).
+CACHE_TTL = 3600
 
 
 # Load variables from backend/.env into the environment (local dev only;
@@ -136,7 +140,7 @@ def require_login(request: Request):
     user = get_user(user_id)
     if user_id is None or user is None:
         raise HTTPException(status_code=401, detail="Not logged in")
-    return {"access_token": user.github_token, "token_type": "bearer"}
+    return {"access_token": decrypt_token(user.github_token), "token_type": "bearer"}
 
 
 
@@ -221,6 +225,23 @@ def get_leetcode(request: Request):
         raise HTTPException(401, "Not logged in")
     user = get_user(user_id)
     if user is None or user.leetcode_username is None:
-        return {"username": None, "stats": None} 
-    stats = fetch_leetcode_stats(user.leetcode_username)
-    return {"username": user.leetcode_username, "stats": stats}
+        return {"username": None, "stats": None}
+
+    # THE FRESHNESS CHECK: is the cache younger than CACHE_TTL seconds?
+    #   time.time()            = now (Unix seconds)
+    #   user.leetcode_updated_at = when we last cached
+    #   the difference          = how old the cache is
+    if user.leetcode_updated_at is not None and time.time() - user.leetcode_updated_at < CACHE_TTL:
+        stats = {
+            "Easy": user.leetcode_easy,
+            "Medium": user.leetcode_medium,
+            "Hard": user.leetcode_hard,
+            "All": (user.leetcode_easy or 0) + (user.leetcode_medium or 0) + (user.leetcode_hard or 0),
+        }
+        return {"username": user.leetcode_username, "stats": stats, "cached": True}
+
+    # Stale or never fetched → call LeetCode, save the fresh counts, return them.
+    fresh = fetch_leetcode_stats(user.leetcode_username)
+    save_leetcode_stats(user_id, fresh.get("Easy", 0), fresh.get("Medium", 0), fresh.get("Hard", 0))
+    return {"username": user.leetcode_username, "stats": fresh, "cached": False}
+

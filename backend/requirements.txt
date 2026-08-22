@@ -6,3 +6,4 @@ python-dotenv
 itsdangerous
 sqlmodel
 psycopg2-binary
+cryptography

@@ -1,7 +1,9 @@
 import os
+import time
 from dotenv import load_dotenv
 from sqlmodel import SQLModel, create_engine, Session, select
 from models import User
+from crypto import encrypt_token
 
 load_dotenv() 
 
@@ -19,9 +21,9 @@ def save_user(github_id, access_token):
     with Session(engine) as session:
         user = session.exec(select(User).where(User.github_id == github_id)).first()
         if user == None:
-            user = User(github_id=github_id, github_token=access_token)
+                user = User(github_id=github_id, github_token=encrypt_token(access_token))
         else:
-            user.github_token = access_token
+                user.github_token = encrypt_token(access_token)
         session.add(user)
         session.commit()
 
@@ -36,5 +38,17 @@ def set_leetcode_username(github_id, username):
             return
         else:
             user.leetcode_username = username
+        session.add(user)
+        session.commit()
+
+def save_leetcode_stats(github_id, easy, medium, hard):
+    with Session(engine) as session:
+        user = session.exec(select(User).where(User.github_id == github_id)).first()
+        if user is None:
+            return
+        user.leetcode_easy = easy
+        user.leetcode_medium = medium
+        user.leetcode_hard = hard
+        user.leetcode_updated_at = time.time()   # record WHEN we cached it (Unix seconds)
         session.add(user)
         session.commit()

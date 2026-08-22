@@ -28,3 +28,13 @@ def save_user(github_id, access_token):
 def get_user(github_id):
     with Session(engine) as session:
         return session.exec(select(User).where(User.github_id == github_id)).first()
+
+def set_leetcode_username(github_id, username):
+    with Session(engine) as session:
+        user = session.exec(select(User).where(User.github_id == github_id)).first()
+        if user == None:
+            return
+        else:
+            user.leetcode_username = username
+        session.add(user)
+        session.commit()

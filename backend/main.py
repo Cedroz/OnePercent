@@ -7,6 +7,13 @@ from fastapi.responses import RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 from authlib.integrations.starlette_client import OAuth
 from database import save_user, get_user
+from pydantic import BaseModel
+from database import save_user, get_user, set_leetcode_username   # add set_leetcode_username
+from leetcode import fetch_leetcode_stats
+
+class LeetCodeUsername(BaseModel):
+    username: str
+
 
 # Load variables from backend/.env into the environment (local dev only;
 # in production, Vercel injects these from its dashboard instead).
@@ -198,3 +205,22 @@ async def get_repos(request: Request):
             "description": repo.get("description"),
         })
     return result
+
+@app.post("/api/leetcode/username")
+def set_leetcode(body: LeetCodeUsername, request: Request):
+    user_id = request.session.get("user_id")
+    if user_id is None:
+        raise HTTPException(401, "Not logged in")
+    set_leetcode_username(user_id, body.username)
+    return {"ok": True}
+
+@app.get("/api/leetcode")
+def get_leetcode(request: Request):
+    user_id = request.session.get("user_id")
+    if user_id is None:
+        raise HTTPException(401, "Not logged in")
+    user = get_user(user_id)
+    if user is None or user.leetcode_username is None:
+        return {"username": None, "stats": None} 
+    stats = fetch_leetcode_stats(user.leetcode_username)
+    return {"username": user.leetcode_username, "stats": stats}

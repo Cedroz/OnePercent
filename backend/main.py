@@ -73,7 +73,7 @@ oauth.register(
     authorize_url="https://github.com/login/oauth/authorize",       # where we send the user (step 2)
     access_token_url="https://github.com/login/oauth/access_token", # where we trade code→token (step 6)
     api_base_url="https://api.github.com/",                          # base for later API calls
-    client_kwargs={"scope": "read:user"},                           # what we're asking permission for
+    client_kwargs={"scope": "read:user"},                           # profile only — public repos, no private access
 )
 
 # Where to send the user after a successful login. Defaults to the local Vite
@@ -167,7 +167,7 @@ async def commits(request: Request):
     profile = (await oauth.github.get("user", token=token)).json()
     login = profile["login"]
 
-    # Their repos, most recently pushed first.
+    # Their public repos, most recently pushed first.
     repos = (await oauth.github.get(
         f"users/{login}/repos?sort=pushed&per_page=5", token=token
     )).json()

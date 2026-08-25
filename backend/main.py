@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 from authlib.integrations.starlette_client import OAuth
-from database import save_user, get_user, save_leetcode_stats, set_leetcode_username
+from database import save_user, get_user, save_leetcode_stats, set_leetcode_username, get_tasks, complete_task, get_points_log, get_streak
 from pydantic import BaseModel
 from leetcode import fetch_leetcode_stats
 from crypto import decrypt_token
@@ -244,4 +244,35 @@ def get_leetcode(request: Request):
     fresh = fetch_leetcode_stats(user.leetcode_username)
     save_leetcode_stats(user_id, fresh.get("Easy", 0), fresh.get("Medium", 0), fresh.get("Hard", 0))
     return {"username": user.leetcode_username, "stats": fresh, "cached": False}
+
+
+# The user's task list (seeds the starter roadmap on first call).
+@app.get("/api/tasks")
+def tasks_endpoint(request: Request):
+    user_id = request.session.get("user_id")
+    if user_id is None:
+        raise HTTPException(401, "Not logged in")
+    return {"tasks": get_tasks(user_id)}
+
+
+# Mark a task complete. {task_id} is a PATH parameter — FastAPI pulls it out of
+# the URL and passes it in as `task_id`.
+@app.post("/api/tasks/{task_id}/complete")
+def complete_task_endpoint(task_id: int, request: Request):
+    user_id = request.session.get("user_id")
+    if user_id is None:
+        raise HTTPException(401, "Not logged in")
+    result = complete_task(user_id, task_id)
+    if result is None:
+        raise HTTPException(404, "Task not found")
+    return {"ok": True}
+
+
+# Streak (consecutive active days) + points history, from the points_log.
+@app.get("/api/stats")
+def stats_endpoint(request: Request):
+    user_id = request.session.get("user_id")
+    if user_id is None:
+        raise HTTPException(401, "Not logged in")
+    return {"streak": get_streak(user_id), "history": get_points_log(user_id)}
 

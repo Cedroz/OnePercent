@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 from authlib.integrations.starlette_client import OAuth
-from database import save_user, get_user, save_leetcode_stats, set_leetcode_username, get_tasks, complete_task, get_points_log, get_streak
+from database import save_user, get_user, save_leetcode_stats, set_leetcode_username, get_tasks, complete_task, get_points_log, get_streak, get_all_user_ids, run_detection
 from pydantic import BaseModel
 from leetcode import fetch_leetcode_stats
 from crypto import decrypt_token
@@ -275,4 +275,18 @@ def stats_endpoint(request: Request):
     if user_id is None:
         raise HTTPException(401, "Not logged in")
     return {"streak": get_streak(user_id), "history": get_points_log(user_id)}
+
+
+# Cron endpoint — Vercel Cron hits this on a schedule to run detection for EVERY
+# user. Protected by a shared secret so random visitors can't trigger it.
+@app.get("/api/cron/detect")
+def cron_detect(request: Request):
+    if request.headers.get("authorization") != f"Bearer {os.getenv('CRON_SECRET')}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    results = {}
+    for github_id in get_all_user_ids():
+        done = run_detection(github_id)
+        if done:
+            results[str(github_id)] = done
+    return {"detected": results}
 

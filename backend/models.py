@@ -20,6 +20,10 @@ class Task(SQLModel, table=True):
     title: str                           # e.g. "Solve 5 medium LeetCode problems"
     points: int                          # awarded when completed
     completed: bool = False
+    # Auto-detection fields (None = manual task, not auto-detected):
+    metric: str | None = None            # "easy" / "medium" / "hard"
+    target: int | None = None            # how many to solve
+    baseline: int | None = None          # metric count when detection started tracking this task
 
 
 class PointsLog(SQLModel, table=True):
@@ -28,3 +32,12 @@ class PointsLog(SQLModel, table=True):
     task_title: str                      # what was completed
     points: int                          # points awarded
     created_at: float                    # Unix seconds — used for history + streak
+
+class Snapshot(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    github_id: int = Field(index=True) 
+    leetcode_easy: int
+    leetcode_medium: int
+    leetcode_hard: int
+    commit_count: int 
+    created_at: float   

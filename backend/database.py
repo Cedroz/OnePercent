@@ -3,8 +3,9 @@ import time
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 from sqlmodel import SQLModel, create_engine, Session, select
-from models import User, Task, PointsLog
+from models import User, Task, PointsLog, Snapshot
 from crypto import encrypt_token
+from leetcode import fetch_leetcode_stats
 
 load_dotenv() 
 
@@ -56,12 +57,13 @@ def save_leetcode_stats(github_id, easy, medium, hard):
 
 
 # A hardcoded starter roadmap. New users get seeded with these (Phase 3 template).
+# (title, points, metric, target) — metric None = manual task (not auto-detected).
 STARTER_TASKS = [
-    ("Solve 5 easy LeetCode problems", 10),
-    ("Solve 3 medium LeetCode problems", 20),
-    ("Solve 1 hard LeetCode problem", 25),
-    ("Make 5 GitHub commits", 10),
-    ("Merge 1 pull request", 15),
+    ("Solve 5 easy LeetCode problems", 10, "easy", 5),
+    ("Solve 3 medium LeetCode problems", 20, "medium", 3),
+    ("Solve 1 hard LeetCode problem", 25, "hard", 1),
+    ("Make 5 GitHub commits", 10, None, None),
+    ("Merge 1 pull request", 15, None, None),
 ]
 
 def get_tasks(github_id):
@@ -69,8 +71,11 @@ def get_tasks(github_id):
         tasks = session.exec(select(Task).where(Task.github_id == github_id)).all()
         if not tasks:
             # First time for this user → seed the starter roadmap.
-            for title, points in STARTER_TASKS:
-                session.add(Task(github_id=github_id, title=title, points=points))
+            for title, points, metric, target in STARTER_TASKS:
+                session.add(Task(
+                    github_id=github_id, title=title, points=points,
+                    metric=metric, target=target,
+                ))
             session.commit()
             tasks = session.exec(select(Task).where(Task.github_id == github_id)).all()
         # Return plain dicts (safe to use after the session closes).
@@ -142,3 +147,88 @@ def get_streak(github_id):
         streak += 1
         day -= timedelta(days=1)
     return streak
+
+def save_snapshot(github_id, easy, medium, hard, commit_count):
+    with Session(engine) as session:
+        snap = Snapshot(
+            github_id=github_id,
+            leetcode_easy=easy,
+            leetcode_medium=medium,
+            leetcode_hard=hard,
+            commit_count=commit_count,
+            created_at=time.time(),
+        )
+        session.add(snap)
+        session.commit()
+
+def get_last_snapshot(github_id):
+    with Session(engine) as session:
+        snap = session.exec(select(Snapshot).where(Snapshot.github_id == github_id).order_by(Snapshot.created_at.desc())).first()  
+    if snap is None:
+        return None
+    return {
+        "leetcode_easy": snap.leetcode_easy,
+        "leetcode_medium": snap.leetcode_medium,
+        "leetcode_hard": snap.leetcode_hard,
+        "commit_count": snap.commit_count,
+        "created_at": snap.created_at,
+    }
+
+
+def capture_snapshot(github_id):
+    # Fetch the user's CURRENT LeetCode numbers and save them as a snapshot row.
+    user = get_user(github_id)
+    if user is None or user.leetcode_username is None:
+        return None
+    stats = fetch_leetcode_stats(user.leetcode_username)
+    easy = stats.get("Easy", 0)
+    medium = stats.get("Medium", 0)
+    hard = stats.get("Hard", 0)
+    # commit_count: GitHub commit detection is a later extension — LeetCode is the
+    # clean auto-detect signal for now, so we store 0 for commits.
+    save_snapshot(github_id, easy, medium, hard, 0)
+    return {"easy": easy, "medium": medium, "hard": hard}
+
+
+def get_all_user_ids():
+    with Session(engine) as session:
+        return [u.github_id for u in session.exec(select(User)).all()]
+
+
+def run_detection(github_id):
+    # 1. Capture a fresh snapshot; this also gives us the current counts.
+    current = capture_snapshot(github_id)   # {"easy","medium","hard"} or None
+    if current is None:
+        return []                            # no LeetCode username → nothing to detect
+
+    completed = []
+    with Session(engine) as session:
+        # Only auto-detectable (metric set) tasks that aren't done yet.
+        tasks = session.exec(
+            select(Task).where(
+                Task.github_id == github_id,
+                Task.completed == False,
+                Task.metric != None,
+            )
+        ).all()
+        for task in tasks:
+            count = current[task.metric]     # current count for this task's metric
+
+            if task.baseline is None:
+                # First time we've seen this task → record the starting line.
+                task.baseline = count
+                session.add(task)
+            elif count - task.baseline >= task.target:
+                # Gained enough since the baseline → auto-complete + log the points.
+                task.completed = True
+                session.add(task)
+                session.add(PointsLog(
+                    github_id=github_id,
+                    task_title=task.title,
+                    points=task.points,
+                    created_at=time.time(),
+                ))
+                completed.append(task.title)
+
+        session.commit()
+    return completed

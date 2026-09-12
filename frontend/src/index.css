@@ -319,6 +319,20 @@ button { font-family: inherit; cursor: pointer; }
 .muted { color: var(--muted); font-size: 0.9rem; }
 .loading { min-height: 100vh; display: flex; align-items: center; justify-content: center; color: var(--muted); }
 
+/* goal line */
+.goal-line { display: flex; align-items: center; gap: 0.7rem; color: var(--text-dim); font-size: 0.92rem; margin: 0 0 1.1rem; }
+.goal-line strong { color: var(--text); }
+.btn-change {
+  padding: 0.15rem 0.6rem;
+  font-size: 0.78rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+.btn-change:hover { color: var(--text); border-color: var(--muted); }
+
 /* responsive */
 @media (max-width: 720px) {
   .stats-row { grid-template-columns: 1fr; }

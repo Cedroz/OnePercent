@@ -7,3 +7,4 @@ itsdangerous
 sqlmodel
 psycopg2-binary
 cryptography
+google-genai

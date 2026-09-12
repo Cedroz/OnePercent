@@ -20,6 +20,8 @@ function App() {
   const [usernameInput, setUsernameInput] = useState('')
   const [tasks, setTasks] = useState([])
   const [stats, setStats] = useState({ streak: 0, history: [] })
+  const [goalInput, setGoalInput] = useState('')
+  const [generating, setGenerating] = useState(false)
   const [loading, setLoading] = useState(true)
 
   async function loadData() {
@@ -60,6 +62,22 @@ function App() {
     await fetch(`${API_URL}/api/tasks/${id}/complete`, { method: 'POST', credentials: 'include' })
     const statsRes = await fetch(`${API_URL}/api/stats`, { credentials: 'include' })
     setStats(await statsRes.json())
+  }
+
+  // Send the goal to the AI planner; it replaces the tasks with a tailored roadmap.
+  async function setGoal(e) {
+    e.preventDefault()
+    setGenerating(true)
+    const res = await fetch(`${API_URL}/api/goal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ goal: goalInput }),
+    })
+    const data = await res.json()
+    setTasks(data.tasks)
+    setUser({ ...user, big_goal: goalInput })
+    setGenerating(false)
   }
 
   if (loading) return <div className="loading">Loading…</div>
@@ -132,32 +150,57 @@ function App() {
       {/* roadmap */}
       <div className="card section-gap">
         <h2>Your roadmap</h2>
-        <ul className="task-list">
-          {tasks.map((t) => (
-            <li key={t.id} className={`task-row${t.completed ? ' done' : ''}`}>
-              <span className="task-title">{t.title}</span>
-              <span className="pts-badge">+{t.points}</span>
-              {t.completed ? (
-                <span className="btn-done">Done</span>
-              ) : (
-                <button className="btn" onClick={() => completeTask(t.id)}>Complete</button>
-              )}
-            </li>
-          ))}
-        </ul>
 
-        {stats.history.length > 0 && (
+        {generating ? (
+          <p className="muted">Generating your roadmap with AI… this takes a few seconds.</p>
+        ) : !user.big_goal ? (
+          // No goal yet → ask for it; the AI builds the roadmap.
+          <form className="lc-form" onSubmit={setGoal}>
+            <label>What are you working toward? The AI builds your roadmap from it.</label>
+            <input
+              className="input"
+              value={goalInput}
+              onChange={(e) => setGoalInput(e.target.value)}
+              placeholder="e.g. land an embedded software engineering internship"
+            />
+            <button type="submit" className="btn-primary">Generate my roadmap</button>
+          </form>
+        ) : (
           <>
-            <h3>Points history</h3>
-            <ul className="history">
-              {stats.history.map((h, i) => (
-                <li key={i}>
-                  <span className="plus">+{h.points}</span>
-                  <span>{h.task_title}</span>
-                  <span className="when">{new Date(h.created_at * 1000).toLocaleDateString()}</span>
+            <p className="goal-line">
+              Goal: <strong>{user.big_goal}</strong>
+              <button className="btn-change" onClick={() => setUser({ ...user, big_goal: null })}>
+                change
+              </button>
+            </p>
+            <ul className="task-list">
+              {tasks.map((t) => (
+                <li key={t.id} className={`task-row${t.completed ? ' done' : ''}`}>
+                  <span className="task-title">{t.title}</span>
+                  <span className="pts-badge">+{t.points}</span>
+                  {t.completed ? (
+                    <span className="btn-done">Done</span>
+                  ) : (
+                    <button className="btn" onClick={() => completeTask(t.id)}>Complete</button>
+                  )}
                 </li>
               ))}
             </ul>
+
+            {stats.history.length > 0 && (
+              <>
+                <h3>Points history</h3>
+                <ul className="history">
+                  {stats.history.map((h, i) => (
+                    <li key={i}>
+                      <span className="plus">+{h.points}</span>
+                      <span>{h.task_title}</span>
+                      <span className="when">{new Date(h.created_at * 1000).toLocaleDateString()}</span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
           </>
         )}
       </div>

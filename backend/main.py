@@ -7,13 +7,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 from authlib.integrations.starlette_client import OAuth
-from database import save_user, get_user, save_leetcode_stats, set_leetcode_username, get_tasks, complete_task, get_points_log, get_streak, get_all_user_ids, run_detection
+from database import save_user, get_user, save_leetcode_stats, set_leetcode_username, get_tasks, complete_task, get_points_log, get_streak, get_all_user_ids, run_detection, set_goal_and_plan
 from pydantic import BaseModel
 from leetcode import fetch_leetcode_stats
 from crypto import decrypt_token
 
 class LeetCodeUsername(BaseModel):
     username: str
+
+class Goal(BaseModel):
+    goal: str
 
 # Refetch LeetCode only if the cached data is older than this (seconds).
 CACHE_TTL = 3600
@@ -150,11 +153,24 @@ def require_login(request: Request):
 async def me(request: Request):
     token = require_login(request)
     profile = (await oauth.github.get("user", token=token)).json()
+    user = get_user(request.session.get("user_id"))
     return {
         "login": profile["login"],
         "name": profile.get("name"),
         "avatar_url": profile.get("avatar_url"),
+        "big_goal": user.big_goal if user else None,
     }
+
+
+# Set the user's goal → generate an AI roadmap → it becomes their tasks.
+# Gemini is called here only (never on page load).
+@app.post("/api/goal")
+def set_goal(body: Goal, request: Request):
+    user_id = request.session.get("user_id")
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="Not logged in")
+    tasks = set_goal_and_plan(user_id, body.goal)
+    return {"tasks": tasks}
 
 
 # The user's recent commits, pulled live from GitHub using their token.

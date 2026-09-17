@@ -27,6 +27,7 @@ class Task(SQLModel, table=True):
     target: int | None = None            # how many to solve
     baseline: int | None = None          # metric count when detection started tracking this task
     resource_url: str | None = None      # optional tutorial link (e.g. a YouTube search) for the task
+    leetcode_slug: str | None = None     # specific problem to auto-complete when solved (e.g. "two-sum")
 
 
 class PointsLog(SQLModel, table=True):

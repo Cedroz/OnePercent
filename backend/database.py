@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from sqlmodel import SQLModel, create_engine, Session, select
 from models import User, Task, PointsLog, Snapshot
 from crypto import encrypt_token, decrypt_token
-from leetcode import fetch_leetcode_stats
+from leetcode import fetch_leetcode_stats, fetch_recent_solves
 from github import count_repo_commits
 from planner import generate_roadmap
 
@@ -102,6 +102,7 @@ def replace_tasks(github_id, tasks):
                 metric=t.get("metric"),
                 target=t.get("target"),
                 resource_url=t.get("resource_url"),
+                leetcode_slug=t.get("leetcode_slug"),
             ))
         session.commit()
 
@@ -296,29 +297,41 @@ def get_all_user_ids():
 
 def run_detection(github_id):
     # 1. Capture a fresh snapshot; this also gives us the current counts.
-    current = capture_snapshot(github_id)   # {"easy","medium","hard"} or None
+    current = capture_snapshot(github_id)   # {"easy","medium","hard","commits"} or None
     if current is None:
-        return []                            # no LeetCode username → nothing to detect
+        return []                            # nothing connected → nothing to detect
+
+    # Recently accepted problems (by slug), for specific-problem tasks.
+    user = get_user(github_id)
+    recent_solves = fetch_recent_solves(user.leetcode_username) if user and user.leetcode_username else set()
 
     completed = []
     with Session(engine) as session:
-        # Only auto-detectable (metric set) tasks that aren't done yet.
+        # Any auto-detectable task not done yet: has a metric (count-based) OR a
+        # specific problem slug (solve-based).
         tasks = session.exec(
             select(Task).where(
                 Task.github_id == github_id,
                 Task.completed == False,
-                Task.metric != None,
             )
         ).all()
         for task in tasks:
-            count = current[task.metric]     # current count for this task's metric
+            done = False
 
-            if task.baseline is None:
-                # First time we've seen this task → record the starting line.
-                task.baseline = count
-                session.add(task)
-            elif count - task.baseline >= task.target:
-                # Gained enough since the baseline → auto-complete + log the points.
+            # Specific problem → complete when it shows up in recent accepted solves.
+            if task.leetcode_slug and task.leetcode_slug in recent_solves:
+                done = True
+            elif task.metric in current:
+                # Count-based: complete once the count rises target above the baseline.
+                count = current[task.metric]
+                if task.baseline is None:
+                    task.baseline = count        # first sighting → set the starting line
+                    session.add(task)
+                    continue
+                if count - task.baseline >= (task.target or 1):
+                    done = True
+
+            if done:
                 task.completed = True
                 session.add(task)
                 session.add(PointsLog(

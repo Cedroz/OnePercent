@@ -307,6 +307,17 @@ def stats_endpoint(request: Request):
     return {"streak": get_streak(user_id), "history": get_points_log(user_id)}
 
 
+# On-demand detection for the logged-in user — lets the dashboard sync their
+# LeetCode/GitHub activity immediately instead of waiting for the daily cron.
+@app.post("/api/detect")
+def detect_me(request: Request):
+    user_id = request.session.get("user_id")
+    if user_id is None:
+        raise HTTPException(401, "Not logged in")
+    completed = run_detection(user_id)
+    return {"completed": completed}
+
+
 # Cron endpoint — Vercel Cron hits this on a schedule to run detection for EVERY
 # user. Protected by a shared secret so random visitors can't trigger it.
 @app.get("/api/cron/detect")

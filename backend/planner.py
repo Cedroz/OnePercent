@@ -108,11 +108,13 @@ def generate_roadmap(goal, context=""):
         metric = t.metric
         target = t.target
         resource_url = None
+        slug = None
 
-        # A specific problem was suggested → verify it's real before linking.
+        # A specific problem was suggested → verify it's real before linking/tracking.
         if t.leetcode_slug:
             problem = fetch_problem(t.leetcode_slug)
             if problem:
+                slug = t.leetcode_slug            # store it so detection can match a solve
                 resource_url = f"https://leetcode.com/problems/{t.leetcode_slug}/"
                 metric = problem["difficulty"]   # trust LeetCode's real difficulty
                 target = 1                        # one specific problem to solve
@@ -127,5 +129,6 @@ def generate_roadmap(goal, context=""):
             "metric": metric,
             "target": target,
             "resource_url": resource_url,
+            "leetcode_slug": slug,
         })
     return tasks

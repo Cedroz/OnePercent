@@ -31,6 +31,7 @@ function App() {
   const [generating, setGenerating] = useState(false)
   const [savingUsername, setSavingUsername] = useState(false)
   const [savingRepo, setSavingRepo] = useState(false)
+  const [syncing, setSyncing] = useState(false)
   const [showPlan, setShowPlan] = useState(false)
   const [now, setNow] = useState(Date.now())
   const [loading, setLoading] = useState(true)
@@ -57,8 +58,27 @@ function App() {
   }
 
   useEffect(() => {
-    loadData().finally(() => setLoading(false))
+    // Load the dashboard, then auto-sync LeetCode/GitHub activity once so tasks
+    // reflect anything solved/committed recently without waiting for the cron.
+    loadData()
+      .then(() => syncProgress())
+      .finally(() => setLoading(false))
   }, [])
+
+  // Run detection for this user, then refresh tasks + stats so any auto-completed
+  // tasks show as done and points update.
+  async function syncProgress() {
+    setSyncing(true)
+    try {
+      await fetch(`${API_URL}/api/detect`, { method: 'POST', credentials: 'include' })
+      const tasksRes = await fetch(`${API_URL}/api/tasks`, { credentials: 'include' })
+      setTasks((await tasksRes.json()).tasks)
+      const statsRes = await fetch(`${API_URL}/api/stats`, { credentials: 'include' })
+      setStats(await statsRes.json())
+    } finally {
+      setSyncing(false)
+    }
+  }
 
   // Tick once a second so the "next refresh" countdown stays live.
   useEffect(() => {
@@ -224,7 +244,14 @@ function App() {
 
       {/* roadmap */}
       <div className="card section-gap">
-        <h2>Your roadmap</h2>
+        <div className="card-head">
+          <h2>Your roadmap</h2>
+          {user.big_goal && (
+            <button className="btn-change" onClick={syncProgress} disabled={syncing}>
+              {syncing ? 'Syncing…' : 'Sync progress'}
+            </button>
+          )}
+        </div>
 
         {generating ? (
           <div className="generating">

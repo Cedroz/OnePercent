@@ -216,6 +216,8 @@ button { font-family: inherit; cursor: pointer; }
   padding: 1.35rem 1.4rem;
 }
 .card h2 { margin: 0 0 1rem; font-size: 1.05rem; font-weight: 700; letter-spacing: -0.01em; }
+.card-head { display: flex; align-items: center; justify-content: space-between; }
+.card-head h2 { margin: 0 0 1rem; }
 .card h3 { margin: 1.4rem 0 0.6rem; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
 
 .section-gap { margin-bottom: 1.25rem; }

@@ -47,3 +47,24 @@ def fetch_problem(slug):
     if not question:
         return None   # slug doesn't exist → don't trust the AI's link
     return {"title": question["title"], "difficulty": question["difficulty"].lower()}
+
+
+# The user's most recent accepted submissions. LeetCode only exposes the latest
+# ~20 publicly (no full "solved history"), so this catches problems solved recently
+# or from now on — used to auto-complete specific-problem tasks.
+RECENT_QUERY = """
+query recentAc($username: String!, $limit: Int!) {
+  recentAcSubmissionList(username: $username, limit: $limit) {
+    titleSlug
+  }
+}
+"""
+
+def fetch_recent_solves(username, limit=20):
+    try:
+        resp = httpx.post(LEETCODE_URL, json={"query": RECENT_QUERY,
+                                              "variables": {"username": username, "limit": limit}})
+        subs = resp.json().get("data", {}).get("recentAcSubmissionList") or []
+    except Exception:
+        return set()
+    return {s["titleSlug"] for s in subs}

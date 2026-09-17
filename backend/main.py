@@ -6,7 +6,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
-from authlib.integrations.starlette_client import OAuth
+from authlib.integrations.starlette_client import OAuth, OAuthError
 from database import save_user, get_user, delete_user_data, save_leetcode_stats, set_leetcode_username, set_tracked_repo, get_tasks, complete_task, get_points_log, get_streak, get_all_user_ids, run_detection, set_goal_and_plan, regenerate_stale_plans, refresh_plan_if_stale
 from pydantic import BaseModel
 from leetcode import fetch_leetcode_stats, fetch_recent_ac
@@ -123,7 +123,12 @@ async def callback(request: Request):
     # Authlib checks the returned `state` against the one saved in our session
     # cookie (CSRF guard), then POSTs the `code` + our client_secret to GitHub
     # and gets back an access token. All the sensitive bits happen server-side.
-    token = await oauth.github.authorize_access_token(request)
+    try:
+        token = await oauth.github.authorize_access_token(request)
+    except OAuthError:
+        # State mismatch / stale or reused login link → don't 500. Send them back
+        # to log in again (a fresh /auth/login issues a new state and works).
+        return RedirectResponse(FRONTEND_URL)
 
     # Use that token to call GitHub's API and fetch the logged-in user's profile.
     resp = await oauth.github.get("user", token=token)

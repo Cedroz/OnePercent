@@ -133,6 +133,7 @@ def set_goal_and_plan(github_id, goal):
             return []
         user.big_goal = goal
         user.plan_overview = overview
+        user.goal_started_at = time.time()   # progress resets: counts from now on
         session.add(user)
         session.commit()
     return regenerate_plan(github_id)
@@ -166,7 +167,8 @@ def regenerate_plan(github_id):
     user = get_user(github_id)
     if user is None or user.big_goal is None:
         return []
-    tasks = generate_roadmap(user.big_goal, _progress_context(github_id))
+    overview = json.loads(user.plan_overview) if user.plan_overview else None
+    tasks = generate_roadmap(user.big_goal, _progress_context(github_id), overview)
     replace_tasks(github_id, tasks)
     with Session(engine) as session:
         u = session.exec(select(User).where(User.github_id == github_id)).first()

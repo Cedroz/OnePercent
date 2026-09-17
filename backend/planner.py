@@ -97,11 +97,27 @@ def generate_overview(goal, context=""):
     }
 
 
-def generate_roadmap(goal, context=""):
+def _phases_text(overview):
+    # Render the stored overview into a compact phase list for the daily prompt.
+    if not overview or not overview.get("phases"):
+        return ""
+    lines = [f'{i+1}. {p["title"]} — {p["focus"]}' for i, p in enumerate(overview["phases"])]
+    return (
+        "Here is the overall multi-phase plan for this goal:\n"
+        + "\n".join(lines)
+        + "\n\nWork out which phase they are CURRENTLY in from their progress above "
+        "(early on = phase 1), and make today's tasks concrete steps WITHIN that phase. "
+        "Do not jump ahead to later phases."
+    )
+
+
+def generate_roadmap(goal, context="", overview=None):
     prompt = f"""You are a coding-career coach. "{goal}" is a LONG-TERM goal that takes
     weeks or months of steady daily effort. Create just TODAY's small set of 3 to 4
     daily tasks — one day's worth of steady progress, NOT everything needed to reach
     the goal.
+
+    {_phases_text(overview)}
 
     {context}
 

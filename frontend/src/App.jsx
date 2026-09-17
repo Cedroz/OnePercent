@@ -229,12 +229,15 @@ function App() {
   // ---------- logged in: dashboard ----------
   const earnedPoints = tasks.filter((t) => t.completed).reduce((s, t) => s + t.points, 0)
   const totalPoints = tasks.reduce((s, t) => s + t.points, 0)
-  // Progress to goal = points actually earned so far vs. the points that "complete"
-  // the goal. Starts at 0 and rises only as you finish tasks; ~500 pts = done, so one
-  // full day (~60 pts) ≈ 12% and a bit over a week of daily tasks reaches 100%.
+  // Progress to goal = points earned toward the CURRENT goal (since it was set) vs.
+  // the ~500 points that "complete" it. Starts at 0, rises as you finish tasks, and
+  // resets when you switch goals (points from the old goal no longer count).
   const GOAL_TARGET_POINTS = 500
-  const lifetimeEarned = stats.history.reduce((s, h) => s + h.points, 0)
-  const goalProgress = Math.min(100, Math.round((lifetimeEarned / GOAL_TARGET_POINTS) * 100))
+  const goalStart = user.goal_started_at || 0
+  const earnedTowardGoal = stats.history
+    .filter((h) => h.created_at >= goalStart)
+    .reduce((s, h) => s + h.points, 0)
+  const goalProgress = Math.min(100, Math.round((earnedTowardGoal / GOAL_TARGET_POINTS) * 100))
 
   return (
     <div className="dashboard">
@@ -317,7 +320,14 @@ function App() {
           <>
             <p className="goal-line">
               Goal: <strong>{user.big_goal}</strong>
-              <button className="btn-change" onClick={() => setUser({ ...user, big_goal: null })}>
+              <button
+                className="btn-change"
+                onClick={() => {
+                  if (window.confirm('Changing your goal resets your progress to 0% (points from this goal stop counting). Continue?')) {
+                    setUser({ ...user, big_goal: null })
+                  }
+                }}
+              >
                 change
               </button>
             </p>

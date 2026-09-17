@@ -7,6 +7,7 @@ class User(SQLModel, table=True):
     leetcode_username: str | None = None
     tracked_repo: str | None = None      # one repo to track, e.g. "Cedroz/OnePercent"
     big_goal: str | None = None
+    goal_started_at: float | None = None  # when the current goal was set — progress counts from here
     plan_overview: str | None = None      # JSON: start-to-finish phased roadmap for the goal
     plan_updated_at: float | None = None  # when the daily task plan was last generated (Unix seconds)
     # Cached LeetCode stats + when they were last fetched (Unix seconds).

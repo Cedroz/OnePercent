@@ -36,6 +36,17 @@ def get_user(github_id):
     with Session(engine) as session:
         return session.exec(select(User).where(User.github_id == github_id)).first()
 
+def delete_user_data(github_id):
+    # Wipe everything for this user, including the account row itself.
+    with Session(engine) as session:
+        for model in (Task, PointsLog, Snapshot):
+            for row in session.exec(select(model).where(model.github_id == github_id)).all():
+                session.delete(row)
+        user = session.exec(select(User).where(User.github_id == github_id)).first()
+        if user is not None:
+            session.delete(user)
+        session.commit()
+
 def set_leetcode_username(github_id, username):
     with Session(engine) as session:
         user = session.exec(select(User).where(User.github_id == github_id)).first()

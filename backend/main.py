@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 from authlib.integrations.starlette_client import OAuth
-from database import save_user, get_user, save_leetcode_stats, set_leetcode_username, set_tracked_repo, get_tasks, complete_task, get_points_log, get_streak, get_all_user_ids, run_detection, set_goal_and_plan, regenerate_stale_plans, refresh_plan_if_stale
+from database import save_user, get_user, delete_user_data, save_leetcode_stats, set_leetcode_username, set_tracked_repo, get_tasks, complete_task, get_points_log, get_streak, get_all_user_ids, run_detection, set_goal_and_plan, regenerate_stale_plans, refresh_plan_if_stale
 from pydantic import BaseModel
 from leetcode import fetch_leetcode_stats, fetch_recent_ac
 from crypto import decrypt_token
@@ -246,6 +246,39 @@ def set_repo(body: TrackedRepo, request: Request):
     if user_id is None:
         raise HTTPException(401, "Not logged in")
     set_tracked_repo(user_id, body.repo)
+    return {"ok": True}
+
+
+# --- account / settings actions ---
+
+@app.post("/auth/logout")
+def logout(request: Request):
+    request.session.clear()   # drop the session → next /api/me is "not logged in"
+    return {"ok": True}
+
+@app.post("/api/leetcode/disconnect")
+def disconnect_leetcode(request: Request):
+    user_id = request.session.get("user_id")
+    if user_id is None:
+        raise HTTPException(401, "Not logged in")
+    set_leetcode_username(user_id, None)
+    return {"ok": True}
+
+@app.post("/api/github/repo/disconnect")
+def disconnect_repo(request: Request):
+    user_id = request.session.get("user_id")
+    if user_id is None:
+        raise HTTPException(401, "Not logged in")
+    set_tracked_repo(user_id, None)
+    return {"ok": True}
+
+@app.post("/api/account/delete")
+def delete_account(request: Request):
+    user_id = request.session.get("user_id")
+    if user_id is None:
+        raise HTTPException(401, "Not logged in")
+    delete_user_data(user_id)   # wipe all data + the account row
+    request.session.clear()     # and log them out
     return {"ok": True}
 
 @app.get("/api/leetcode")

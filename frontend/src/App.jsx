@@ -34,6 +34,8 @@ function App() {
   const [savingRepo, setSavingRepo] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [showPlan, setShowPlan] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
   const [now, setNow] = useState(Date.now())
   const [loading, setLoading] = useState(true)
 
@@ -150,6 +152,23 @@ function App() {
     setStats(await statsRes.json())
   }
 
+  // --- account / settings actions ---
+  async function logout() {
+    await fetch(`${API_URL}/auth/logout`, { method: 'POST', credentials: 'include' })
+    setUser(null)   // back to the login screen
+  }
+
+  async function disconnect(path) {
+    await fetch(`${API_URL}${path}`, { method: 'POST', credentials: 'include' })
+    await loadData()
+  }
+
+  async function deleteAccount() {
+    if (!window.confirm('Delete your account and all data? This cannot be undone.')) return
+    await fetch(`${API_URL}/api/account/delete`, { method: 'POST', credentials: 'include' })
+    setUser(null)
+  }
+
   // Send the goal to the AI planner; it replaces the tasks with a tailored roadmap.
   async function setGoal(e) {
     e.preventDefault()
@@ -221,9 +240,21 @@ function App() {
     <div className="dashboard">
       <header className="topbar">
         <div className="brand-sm">One<span className="pct">Percent</span></div>
-        <div className="user-chip">
-          {user.avatar_url && <img src={user.avatar_url} alt="" />}
-          {user.login}
+        <div className="user-menu">
+          <button className="user-chip" onClick={() => setMenuOpen((v) => !v)}>
+            {user.avatar_url && <img src={user.avatar_url} alt="" />}
+            {user.login}
+            <span className="chev" aria-hidden="true">▾</span>
+          </button>
+          {menuOpen && (
+            <>
+              <div className="menu-backdrop" onClick={() => setMenuOpen(false)} />
+              <div className="menu-dropdown">
+                <button onClick={() => { setShowSettings(true); setMenuOpen(false) }}>Settings</button>
+                <button onClick={() => { setMenuOpen(false); logout() }}>Log out</button>
+              </div>
+            </>
+          )}
         </div>
       </header>
 
@@ -451,6 +482,55 @@ function App() {
           )}
         </div>
       </div>
+
+      {showSettings && (
+        <div className="modal-backdrop" onClick={() => setShowSettings(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <h2>Settings</h2>
+              <button className="modal-close" onClick={() => setShowSettings(false)} aria-label="Close">×</button>
+            </div>
+
+            <section className="settings-section">
+              <h3>Account</h3>
+              <div className="settings-row">
+                <span>Signed in as</span>
+                <strong>{user.login}</strong>
+              </div>
+            </section>
+
+            <section className="settings-section">
+              <h3>Connections</h3>
+              <div className="settings-row">
+                <span>LeetCode</span>
+                {leetcode?.username ? (
+                  <span className="conn">
+                    <strong>@{leetcode.username}</strong>
+                    <button className="btn-change" onClick={() => disconnect('/api/leetcode/disconnect')}>Disconnect</button>
+                  </span>
+                ) : <span className="muted">Not connected</span>}
+              </div>
+              <div className="settings-row">
+                <span>GitHub repo</span>
+                {user.tracked_repo ? (
+                  <span className="conn">
+                    <strong>{user.tracked_repo}</strong>
+                    <button className="btn-change" onClick={() => disconnect('/api/github/repo/disconnect')}>Disconnect</button>
+                  </span>
+                ) : <span className="muted">Not connected</span>}
+              </div>
+            </section>
+
+            <section className="settings-section danger">
+              <h3>Danger zone</h3>
+              <div className="settings-row">
+                <span>Permanently delete your account and all data.</span>
+                <button className="btn-danger" onClick={deleteAccount}>Delete account</button>
+              </div>
+            </section>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

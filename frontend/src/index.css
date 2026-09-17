@@ -159,6 +159,52 @@ button { font-family: inherit; cursor: pointer; }
 }
 .user-chip img { width: 26px; height: 26px; border-radius: 999px; }
 
+/* user menu dropdown */
+.user-menu { position: relative; }
+.user-chip { color: var(--text); }
+.user-chip .chev { color: var(--muted); font-size: 0.7rem; margin-left: 0.1rem; }
+.user-chip:hover { border-color: var(--muted); }
+.menu-backdrop { position: fixed; inset: 0; z-index: 40; }
+.menu-dropdown {
+  position: absolute; right: 0; top: calc(100% + 0.5rem); z-index: 50;
+  min-width: 160px; background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 0.35rem; display: flex; flex-direction: column;
+  box-shadow: 0 20px 50px -20px rgba(0, 0, 0, 0.7);
+}
+.menu-dropdown button {
+  text-align: left; background: transparent; border: none; color: var(--text);
+  padding: 0.55rem 0.7rem; border-radius: 7px; font-size: 0.9rem;
+}
+.menu-dropdown button:hover { background: var(--surface-hover); }
+
+/* modal + settings */
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 100; background: rgba(0, 0, 0, 0.6);
+  display: flex; align-items: center; justify-content: center; padding: 1.5rem;
+  backdrop-filter: blur(2px);
+}
+.modal {
+  width: 100%; max-width: 460px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 1.5rem; box-shadow: 0 30px 80px -20px rgba(0, 0, 0, 0.8);
+}
+.modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.3rem; }
+.modal-head h2 { margin: 0; font-size: 1.2rem; }
+.modal-close { background: transparent; border: none; color: var(--muted); font-size: 1.5rem; line-height: 1; padding: 0 0.3rem; }
+.modal-close:hover { color: var(--text); }
+.settings-section { padding: 1rem 0; border-top: 1px solid var(--border-soft); }
+.settings-section h3 { margin: 0 0 0.7rem; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+.settings-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; font-size: 0.9rem; color: var(--text-dim); }
+.settings-row + .settings-row { margin-top: 0.6rem; }
+.settings-row strong { color: var(--text); }
+.conn { display: inline-flex; align-items: center; gap: 0.6rem; }
+.settings-section.danger h3 { color: var(--hard); }
+.btn-danger {
+  padding: 0.4rem 0.8rem; font-size: 0.85rem; font-weight: 600;
+  color: #fff; background: var(--hard); border: none; border-radius: 8px; white-space: nowrap;
+}
+.btn-danger:hover { filter: brightness(1.08); }
+
 /* stat cards */
 .stats-row {
   display: grid;

@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 from authlib.integrations.starlette_client import OAuth
-from database import save_user, get_user, save_leetcode_stats, set_leetcode_username, set_tracked_repo, get_tasks, complete_task, get_points_log, get_streak, get_all_user_ids, run_detection, set_goal_and_plan, regenerate_stale_plans
+from database import save_user, get_user, save_leetcode_stats, set_leetcode_username, set_tracked_repo, get_tasks, complete_task, get_points_log, get_streak, get_all_user_ids, run_detection, set_goal_and_plan, regenerate_stale_plans, refresh_plan_if_stale
 from pydantic import BaseModel
 from leetcode import fetch_leetcode_stats, fetch_recent_ac
 from crypto import decrypt_token
@@ -305,6 +305,17 @@ def stats_endpoint(request: Request):
     if user_id is None:
         raise HTTPException(401, "Not logged in")
     return {"streak": get_streak(user_id), "history": get_points_log(user_id)}
+
+
+# Roll the daily plan over if a new Pacific day has begun. The dashboard calls
+# this on load so tasks refresh at midnight PT without waiting for the cron.
+@app.post("/api/plan/refresh")
+def plan_refresh(request: Request):
+    user_id = request.session.get("user_id")
+    if user_id is None:
+        raise HTTPException(401, "Not logged in")
+    regenerated = refresh_plan_if_stale(user_id)
+    return {"regenerated": regenerated}
 
 
 # The user's most recent accepted LeetCode problems, for display in the app.

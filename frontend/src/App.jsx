@@ -42,6 +42,9 @@ function App() {
     if (!meRes.ok) { setUser(null); return }
     setUser(await meRes.json())
 
+    // Roll the plan over if a new Pacific day started, before we load the tasks.
+    await fetch(`${API_URL}/api/plan/refresh`, { method: 'POST', credentials: 'include' })
+
     const commitsRes = await fetch(`${API_URL}/api/commits`, { credentials: 'include' })
     setCommits((await commitsRes.json()).commits)
 
@@ -90,12 +93,17 @@ function App() {
     return () => clearInterval(id)   // cleanup: stop the timer if the component unmounts
   }, [])
 
-  // Format the time left until the plan regenerates (24h after plan_updated_at).
+  // Time left until the next midnight US Pacific time, when tasks roll over.
   function countdown() {
     if (!user?.plan_updated_at) return null
-    const nextMs = user.plan_updated_at * 1000 + 24 * 60 * 60 * 1000
-    let s = Math.floor((nextMs - now) / 1000)
-    if (s <= 0) return 'due now'
+    // Read the current wall-clock time in Pacific, then count down to 24:00:00.
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Los_Angeles', hour12: false,
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    }).formatToParts(new Date(now))
+    const get = (t) => Number(parts.find((p) => p.type === t).value)
+    const secsIntoDay = (get('hour') % 24) * 3600 + get('minute') * 60 + get('second')
+    let s = 86400 - secsIntoDay
     const h = String(Math.floor(s / 3600)).padStart(2, '0')
     const m = String(Math.floor((s % 3600) / 60)).padStart(2, '0')
     s = String(s % 60).padStart(2, '0')

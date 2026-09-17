@@ -1,6 +1,7 @@
 import os
 import time
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from sqlmodel import SQLModel, create_engine, Session, select
 from models import User, Task, PointsLog, Snapshot
@@ -157,17 +158,37 @@ def regenerate_plan(github_id):
     return get_tasks(github_id)
 
 
-DAY_SECONDS = 86400
+# Daily plans roll over at midnight US Pacific time (not a rolling 24h window).
+PACIFIC = ZoneInfo("America/Los_Angeles")
+
+def _plan_is_stale(user):
+    # Stale if the plan was last generated on an earlier Pacific calendar day
+    # (or never) — i.e. a new day has started since.
+    if user.plan_updated_at is None:
+        return True
+    last_day = datetime.fromtimestamp(user.plan_updated_at, PACIFIC).date()
+    today = datetime.now(PACIFIC).date()
+    return last_day < today
+
+def refresh_plan_if_stale(github_id):
+    # Regenerate this user's plan if a new Pacific day has begun. Called on app
+    # load so tasks roll over at midnight even without the cron.
+    user = get_user(github_id)
+    if user is None or user.big_goal is None:
+        return False
+    if _plan_is_stale(user):
+        regenerate_plan(github_id)
+        return True
+    return False
 
 def regenerate_stale_plans():
-    # Cron helper: refresh every user whose plan is older than 24h (or never set).
+    # Cron helper: refresh every user whose plan is from a previous Pacific day.
     regenerated = []
     for github_id in get_all_user_ids():
         user = get_user(github_id)
         if user is None or user.big_goal is None:
             continue
-        last = user.plan_updated_at or 0
-        if time.time() - last >= DAY_SECONDS:
+        if _plan_is_stale(user):
             regenerate_plan(github_id)
             regenerated.append(github_id)
     return regenerated

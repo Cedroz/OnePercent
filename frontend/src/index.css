@@ -260,7 +260,7 @@ button { font-family: inherit; cursor: pointer; }
 .history .when { color: var(--muted); font-size: 0.78rem; margin-left: auto; }
 
 /* commits */
-.commit-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.55rem; }
+.commit-list { list-style: none; margin: 1.1rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.55rem; }
 .commit-item { display: flex; flex-direction: column; gap: 0.15rem; }
 .commit-top { display: flex; align-items: center; gap: 0.5rem; }
 .sha {
@@ -306,6 +306,10 @@ button { font-family: inherit; cursor: pointer; }
 }
 .input:focus { border-color: var(--accent); }
 .btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
   padding: 0.6rem 1rem;
   font-weight: 600;
   color: #05130a;
@@ -315,9 +319,30 @@ button { font-family: inherit; cursor: pointer; }
   transition: filter 0.12s ease, transform 0.1s ease;
 }
 .btn-primary:hover { filter: brightness(1.06); transform: translateY(-1px); }
+.btn-primary:disabled { opacity: 0.55; cursor: not-allowed; filter: none; transform: none; }
 
 .muted { color: var(--muted); font-size: 0.9rem; }
 .loading { min-height: 100vh; display: flex; align-items: center; justify-content: center; color: var(--muted); }
+
+/* AI generating spinner */
+.generating { display: flex; align-items: center; gap: 0.7rem; padding: 0.4rem 0; }
+.spinner {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 999px;
+  animation: spin 0.7s linear infinite;
+}
+/* Smaller, dark variant so it's visible inside the green primary button. */
+.spinner-btn {
+  width: 14px;
+  height: 14px;
+  border-color: rgba(5, 19, 10, 0.3);
+  border-top-color: #05130a;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 
 /* goal line */
 .goal-line { display: flex; align-items: center; gap: 0.7rem; color: var(--text-dim); font-size: 0.92rem; margin: 0 0 1.1rem; }
@@ -332,6 +357,43 @@ button { font-family: inherit; cursor: pointer; }
   transition: color 0.12s ease, border-color 0.12s ease;
 }
 .btn-change:hover { color: var(--text); border-color: var(--muted); }
+
+/* daily plan: countdown bar + view-plan panel */
+.plan-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+  padding: 0.6rem 0.8rem;
+  margin-bottom: 1rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  font-size: 0.88rem;
+}
+.plan-bar strong { color: var(--accent); }
+
+.plan-panel {
+  margin-bottom: 1.1rem;
+  padding: 0.4rem 1rem 0.9rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+}
+.plan-list { margin: 0; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.7rem; }
+.plan-list li { color: var(--text-dim); }
+.plan-main { display: flex; align-items: center; gap: 0.6rem; }
+.plan-main span:first-child { color: var(--text); }
+.plan-meta { display: flex; align-items: center; gap: 0.8rem; margin-top: 0.25rem; font-size: 0.8rem; }
+.auto-tag {
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+}
+.plan-meta a, .tut-link { color: var(--medium); text-decoration: none; }
+.plan-meta a:hover, .tut-link:hover { text-decoration: underline; }
+.tut-link { margin-left: 0.6rem; font-size: 0.8rem; white-space: nowrap; }
 
 /* responsive */
 @media (max-width: 720px) {

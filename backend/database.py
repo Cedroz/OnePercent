@@ -4,8 +4,9 @@ from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 from sqlmodel import SQLModel, create_engine, Session, select
 from models import User, Task, PointsLog, Snapshot
-from crypto import encrypt_token
+from crypto import encrypt_token, decrypt_token
 from leetcode import fetch_leetcode_stats
+from github import count_repo_commits
 from planner import generate_roadmap
 
 load_dotenv() 
@@ -44,6 +45,15 @@ def set_leetcode_username(github_id, username):
         session.add(user)
         session.commit()
 
+def set_tracked_repo(github_id, repo):
+    with Session(engine) as session:
+        user = session.exec(select(User).where(User.github_id == github_id)).first()
+        if user is None:
+            return
+        user.tracked_repo = repo
+        session.add(user)
+        session.commit()
+
 def save_leetcode_stats(github_id, easy, medium, hard):
     with Session(engine) as session:
         user = session.exec(select(User).where(User.github_id == github_id)).first()
@@ -73,7 +83,9 @@ def get_tasks(github_id):
     with Session(engine) as session:
         tasks = session.exec(select(Task).where(Task.github_id == github_id)).all()
         return [
-            {"id": t.id, "title": t.title, "points": t.points, "completed": t.completed}
+            {"id": t.id, "title": t.title, "points": t.points,
+             "completed": t.completed, "resource_url": t.resource_url,
+             "metric": t.metric, "target": t.target}
             for t in tasks
         ]
 
@@ -89,11 +101,13 @@ def replace_tasks(github_id, tasks):
                 points=t["points"],
                 metric=t.get("metric"),
                 target=t.get("target"),
+                resource_url=t.get("resource_url"),
             ))
         session.commit()
 
 
 def set_goal_and_plan(github_id, goal):
+    # Save the goal, then build the first daily plan from it.
     with Session(engine) as session:
         user = session.exec(select(User).where(User.github_id == github_id)).first()
         if user is None:
@@ -101,9 +115,61 @@ def set_goal_and_plan(github_id, goal):
         user.big_goal = goal
         session.add(user)
         session.commit()
-        tasks = generate_roadmap(goal) 
-        replace_tasks(github_id, tasks)
-        return get_tasks(github_id)
+    return regenerate_plan(github_id)
+
+
+def _progress_context(github_id):
+    # A short natural-language summary of what the user has done, so Gemini can
+    # generate the NEXT day's tasks instead of repeating from scratch.
+    user = get_user(github_id)
+    lines = []
+    if user and user.leetcode_username:
+        e = user.leetcode_easy or 0
+        m = user.leetcode_medium or 0
+        h = user.leetcode_hard or 0
+        lines.append(f"LeetCode solved so far: {e} easy, {m} medium, {h} hard.")
+    snap = get_last_snapshot(github_id)
+    if user and user.tracked_repo and snap:
+        lines.append(f"Their tracked repo {user.tracked_repo} has {snap['commit_count']} commits.")
+    log = get_points_log(github_id)
+    if log:
+        recent = "; ".join(l["task_title"] for l in log[:10])
+        lines.append(f"Tasks they've already completed: {recent}.")
+    else:
+        lines.append("They are just getting started (no completed tasks yet).")
+    return "Here is their progress so far:\n" + "\n".join("- " + l for l in lines)
+
+
+def regenerate_plan(github_id):
+    # Build a fresh daily task list for the user's existing goal, then stamp the
+    # time so the 24h cycle restarts. Keeps PointsLog (streak/history) intact.
+    user = get_user(github_id)
+    if user is None or user.big_goal is None:
+        return []
+    tasks = generate_roadmap(user.big_goal, _progress_context(github_id))
+    replace_tasks(github_id, tasks)
+    with Session(engine) as session:
+        u = session.exec(select(User).where(User.github_id == github_id)).first()
+        u.plan_updated_at = time.time()
+        session.add(u)
+        session.commit()
+    return get_tasks(github_id)
+
+
+DAY_SECONDS = 86400
+
+def regenerate_stale_plans():
+    # Cron helper: refresh every user whose plan is older than 24h (or never set).
+    regenerated = []
+    for github_id in get_all_user_ids():
+        user = get_user(github_id)
+        if user is None or user.big_goal is None:
+            continue
+        last = user.plan_updated_at or 0
+        if time.time() - last >= DAY_SECONDS:
+            regenerate_plan(github_id)
+            regenerated.append(github_id)
+    return regenerated
 
 def complete_task(github_id, task_id):
     with Session(engine) as session:
@@ -197,18 +263,30 @@ def get_last_snapshot(github_id):
 
 
 def capture_snapshot(github_id):
-    # Fetch the user's CURRENT LeetCode numbers and save them as a snapshot row.
+    # Fetch the user's CURRENT LeetCode + GitHub numbers and save them as a snapshot.
     user = get_user(github_id)
-    if user is None or user.leetcode_username is None:
+    # Nothing to track if they've connected neither signal.
+    if user is None or (user.leetcode_username is None and user.tracked_repo is None):
         return None
-    stats = fetch_leetcode_stats(user.leetcode_username)
-    easy = stats.get("Easy", 0)
-    medium = stats.get("Medium", 0)
-    hard = stats.get("Hard", 0)
-    # commit_count: GitHub commit detection is a later extension — LeetCode is the
-    # clean auto-detect signal for now, so we store 0 for commits.
-    save_snapshot(github_id, easy, medium, hard, 0)
-    return {"easy": easy, "medium": medium, "hard": hard}
+
+    # LeetCode side (only if they gave a username).
+    if user.leetcode_username:
+        stats = fetch_leetcode_stats(user.leetcode_username)
+        easy = stats.get("Easy", 0)
+        medium = stats.get("Medium", 0)
+        hard = stats.get("Hard", 0)
+    else:
+        easy = medium = hard = 0
+
+    # GitHub side (only if they picked a repo to track). Runs from the cron with
+    # no live login, so we decrypt the stored token and call GitHub directly.
+    if user.tracked_repo:
+        commit_count = count_repo_commits(user.tracked_repo, decrypt_token(user.github_token))
+    else:
+        commit_count = 0
+
+    save_snapshot(github_id, easy, medium, hard, commit_count)
+    return {"easy": easy, "medium": medium, "hard": hard, "commits": commit_count}
 
 
 def get_all_user_ids():

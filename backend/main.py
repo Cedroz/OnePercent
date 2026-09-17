@@ -7,13 +7,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 from authlib.integrations.starlette_client import OAuth
-from database import save_user, get_user, save_leetcode_stats, set_leetcode_username, get_tasks, complete_task, get_points_log, get_streak, get_all_user_ids, run_detection, set_goal_and_plan
+from database import save_user, get_user, save_leetcode_stats, set_leetcode_username, set_tracked_repo, get_tasks, complete_task, get_points_log, get_streak, get_all_user_ids, run_detection, set_goal_and_plan, regenerate_stale_plans
 from pydantic import BaseModel
 from leetcode import fetch_leetcode_stats
 from crypto import decrypt_token
 
 class LeetCodeUsername(BaseModel):
     username: str
+
+class TrackedRepo(BaseModel):
+    repo: str
 
 class Goal(BaseModel):
     goal: str
@@ -159,6 +162,8 @@ async def me(request: Request):
         "name": profile.get("name"),
         "avatar_url": profile.get("avatar_url"),
         "big_goal": user.big_goal if user else None,
+        "tracked_repo": user.tracked_repo if user else None,
+        "plan_updated_at": user.plan_updated_at if user else None,
     }
 
 
@@ -234,6 +239,15 @@ def set_leetcode(body: LeetCodeUsername, request: Request):
     set_leetcode_username(user_id, body.username)
     return {"ok": True}
 
+# Pick the one repo whose commits get auto-tracked toward "make N commits" tasks.
+@app.post("/api/github/repo")
+def set_repo(body: TrackedRepo, request: Request):
+    user_id = request.session.get("user_id")
+    if user_id is None:
+        raise HTTPException(401, "Not logged in")
+    set_tracked_repo(user_id, body.repo)
+    return {"ok": True}
+
 @app.get("/api/leetcode")
 def get_leetcode(request: Request):
     user_id = request.session.get("user_id")
@@ -304,5 +318,8 @@ def cron_detect(request: Request):
         done = run_detection(github_id)
         if done:
             results[str(github_id)] = done
-    return {"detected": results}
+    # After logging yesterday's completions (which feed the context), refresh any
+    # plan older than 24h with a fresh, progress-aware set of daily tasks.
+    regenerated = regenerate_stale_plans()
+    return {"detected": results, "regenerated": regenerated}
 

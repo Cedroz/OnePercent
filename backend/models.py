@@ -5,7 +5,9 @@ class User(SQLModel, table=True):
     github_id: int = Field(unique=True, index=True)
     github_token: str
     leetcode_username: str | None = None
+    tracked_repo: str | None = None      # one repo to track, e.g. "Cedroz/OnePercent"
     big_goal: str | None = None
+    plan_updated_at: float | None = None  # when the daily task plan was last generated (Unix seconds)
     # Cached LeetCode stats + when they were last fetched (Unix seconds).
     # We read these instead of calling LeetCode, and only refetch when stale.
     leetcode_easy: int | None = None
@@ -24,6 +26,7 @@ class Task(SQLModel, table=True):
     metric: str | None = None            # "easy" / "medium" / "hard"
     target: int | None = None            # how many to solve
     baseline: int | None = None          # metric count when detection started tracking this task
+    resource_url: str | None = None      # optional tutorial link (e.g. a YouTube search) for the task
 
 
 class PointsLog(SQLModel, table=True):

@@ -4,6 +4,11 @@ import { useState, useEffect } from 'react'
 // In production it's the full backend URL (set in Vercel).
 const API_URL = import.meta.env.VITE_API_URL || ''
 
+// A LeetCode problem link says "solve"; a YouTube tutorial search says "tutorial".
+function linkLabel(url) {
+  return url && url.includes('leetcode.com/problems') ? 'solve ↗' : 'tutorial ↗'
+}
+
 // GitHub logo mark for the login button.
 function GitHubMark() {
   return (
@@ -18,10 +23,16 @@ function App() {
   const [commits, setCommits] = useState([])
   const [leetcode, setLeetcode] = useState(null)
   const [usernameInput, setUsernameInput] = useState('')
+  const [repos, setRepos] = useState([])
+  const [repoInput, setRepoInput] = useState('')
   const [tasks, setTasks] = useState([])
   const [stats, setStats] = useState({ streak: 0, history: [] })
   const [goalInput, setGoalInput] = useState('')
   const [generating, setGenerating] = useState(false)
+  const [savingUsername, setSavingUsername] = useState(false)
+  const [savingRepo, setSavingRepo] = useState(false)
+  const [showPlan, setShowPlan] = useState(false)
+  const [now, setNow] = useState(Date.now())
   const [loading, setLoading] = useState(true)
 
   async function loadData() {
@@ -35,6 +46,9 @@ function App() {
     const lcRes = await fetch(`${API_URL}/api/leetcode`, { credentials: 'include' })
     setLeetcode(await lcRes.json())
 
+    const reposRes = await fetch(`${API_URL}/api/repos`, { credentials: 'include' })
+    setRepos(await reposRes.json())
+
     const tasksRes = await fetch(`${API_URL}/api/tasks`, { credentials: 'include' })
     setTasks((await tasksRes.json()).tasks)
 
@@ -46,15 +60,55 @@ function App() {
     loadData().finally(() => setLoading(false))
   }, [])
 
+  // Tick once a second so the "next refresh" countdown stays live.
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)   // cleanup: stop the timer if the component unmounts
+  }, [])
+
+  // Format the time left until the plan regenerates (24h after plan_updated_at).
+  function countdown() {
+    if (!user?.plan_updated_at) return null
+    const nextMs = user.plan_updated_at * 1000 + 24 * 60 * 60 * 1000
+    let s = Math.floor((nextMs - now) / 1000)
+    if (s <= 0) return 'due now'
+    const h = String(Math.floor(s / 3600)).padStart(2, '0')
+    const m = String(Math.floor((s % 3600) / 60)).padStart(2, '0')
+    s = String(s % 60).padStart(2, '0')
+    return `${h}:${m}:${s}`
+  }
+
   async function saveUsername(e) {
     e.preventDefault()
-    await fetch(`${API_URL}/api/leetcode/username`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ username: usernameInput }),
-    })
-    await loadData()
+    setSavingUsername(true)
+    try {
+      await fetch(`${API_URL}/api/leetcode/username`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ username: usernameInput }),
+      })
+      await loadData()
+    } finally {
+      setSavingUsername(false)
+    }
+  }
+
+  // Pick the repo to auto-track commits from.
+  async function saveRepo(e) {
+    e.preventDefault()
+    setSavingRepo(true)
+    try {
+      await fetch(`${API_URL}/api/github/repo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ repo: repoInput }),
+      })
+      await loadData()
+    } finally {
+      setSavingRepo(false)
+    }
   }
 
   async function completeTask(id) {
@@ -68,16 +122,28 @@ function App() {
   async function setGoal(e) {
     e.preventDefault()
     setGenerating(true)
-    const res = await fetch(`${API_URL}/api/goal`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ goal: goalInput }),
-    })
-    const data = await res.json()
-    setTasks(data.tasks)
-    setUser({ ...user, big_goal: goalInput })
-    setGenerating(false)
+    try {
+      const res = await fetch(`${API_URL}/api/goal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ goal: goalInput }),
+      })
+      if (!res.ok) throw new Error(`Server returned ${res.status}`)
+      const data = await res.json()
+      setTasks(data.tasks)
+      // Stamp plan time locally so the countdown starts right away (the backend
+      // just set it to ~now); a later loadData will sync the exact value.
+      setUser({ ...user, big_goal: goalInput, plan_updated_at: Date.now() / 1000 })
+    } catch (err) {
+      // The response may have been lost even though the backend saved the roadmap
+      // (slow AI call / serverless timeout). Re-sync from the server so a stuck
+      // spinner self-heals into the real state instead of needing a manual refresh.
+      console.error('Goal generation failed (re-syncing):', err)
+      await loadData()
+    } finally {
+      setGenerating(false)   // ALWAYS runs, success or failure → spinner can't get stuck
+    }
   }
 
   if (loading) return <div className="loading">Loading…</div>
@@ -152,7 +218,10 @@ function App() {
         <h2>Your roadmap</h2>
 
         {generating ? (
-          <p className="muted">Generating your roadmap with AI… this takes a few seconds.</p>
+          <div className="generating">
+            <span className="spinner" />
+            <span className="muted">Generating your roadmap with AI… this takes a few seconds.</span>
+          </div>
         ) : !user.big_goal ? (
           // No goal yet → ask for it; the AI builds the roadmap.
           <form className="lc-form" onSubmit={setGoal}>
@@ -173,10 +242,49 @@ function App() {
                 change
               </button>
             </p>
+
+            <div className="plan-bar">
+              <span className="muted">
+                New tasks in <strong className="mono">{countdown() || '—'}</strong>
+              </span>
+              <button className="btn-change" onClick={() => setShowPlan((v) => !v)}>
+                {showPlan ? 'Hide plan' : 'View plan'}
+              </button>
+            </div>
+
+            {showPlan && (
+              <div className="plan-panel">
+                <h3>Today's plan (from Gemini)</h3>
+                <ol className="plan-list">
+                  {tasks.map((t) => (
+                    <li key={t.id}>
+                      <div className="plan-main">
+                        <span>{t.title}</span>
+                        <span className="pts-badge">+{t.points}</span>
+                      </div>
+                      <div className="plan-meta">
+                        {t.metric && <span className="auto-tag">auto-tracked · {t.target} {t.metric}</span>}
+                        {t.resource_url && (
+                          <a href={t.resource_url} target="_blank" rel="noopener noreferrer">{linkLabel(t.resource_url)}</a>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )}
+
             <ul className="task-list">
               {tasks.map((t) => (
                 <li key={t.id} className={`task-row${t.completed ? ' done' : ''}`}>
-                  <span className="task-title">{t.title}</span>
+                  <span className="task-title">
+                    {t.title}
+                    {t.resource_url && (
+                      <a className="tut-link" href={t.resource_url} target="_blank" rel="noopener noreferrer">
+                        {linkLabel(t.resource_url)}
+                      </a>
+                    )}
+                  </span>
                   <span className="pts-badge">+{t.points}</span>
                   {t.completed ? (
                     <span className="btn-done">Done</span>
@@ -209,6 +317,33 @@ function App() {
       <div className="columns">
         <div className="card">
           <h2>Recent commits</h2>
+
+          {user.tracked_repo ? (
+            <p className="lc-user">
+              Tracking <strong>{user.tracked_repo}</strong>
+              <button className="btn-change" onClick={() => setUser({ ...user, tracked_repo: null })}>
+                change
+              </button>
+            </p>
+          ) : (
+            <form className="lc-form" onSubmit={saveRepo}>
+              <label>Pick one repo to track commits from:</label>
+              <select
+                className="input"
+                value={repoInput}
+                onChange={(e) => setRepoInput(e.target.value)}
+              >
+                <option value="" disabled>Select a repo…</option>
+                {repos.map((r) => (
+                  <option key={r.repo} value={r.repo}>{r.repo}</option>
+                ))}
+              </select>
+              <button type="submit" className="btn-primary" disabled={!repoInput || savingRepo}>
+                {savingRepo ? (<><span className="spinner spinner-btn" /> Saving…</>) : 'Track this repo'}
+              </button>
+            </form>
+          )}
+
           {commits.length === 0 ? (
             <p className="muted">No recent commits found.</p>
           ) : (
@@ -247,7 +382,9 @@ function App() {
                 onChange={(e) => setUsernameInput(e.target.value)}
                 placeholder="e.g. elee136"
               />
-              <button type="submit" className="btn-primary">Save username</button>
+              <button type="submit" className="btn-primary" disabled={!usernameInput || savingUsername}>
+                {savingUsername ? (<><span className="spinner spinner-btn" /> Saving…</>) : 'Save username'}
+              </button>
             </form>
           )}
         </div>

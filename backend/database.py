@@ -1,5 +1,6 @@
 import os
 import time
+import json
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
@@ -8,7 +9,7 @@ from models import User, Task, PointsLog, Snapshot
 from crypto import encrypt_token, decrypt_token
 from leetcode import fetch_leetcode_stats, fetch_recent_ac, fetch_problem
 from github import count_repo_commits
-from planner import generate_roadmap
+from planner import generate_roadmap, generate_overview
 
 load_dotenv() 
 
@@ -120,12 +121,18 @@ def replace_tasks(github_id, tasks):
 
 
 def set_goal_and_plan(github_id, goal):
-    # Save the goal, then build the first daily plan from it.
+    # Save the goal + a start-to-finish overview, then build the first daily plan.
+    # The overview is generated once here (stable), not on every daily refresh.
+    try:
+        overview = json.dumps(generate_overview(goal))
+    except Exception:
+        overview = None   # don't let an overview hiccup block goal-setting
     with Session(engine) as session:
         user = session.exec(select(User).where(User.github_id == github_id)).first()
         if user is None:
             return []
         user.big_goal = goal
+        user.plan_overview = overview
         session.add(user)
         session.commit()
     return regenerate_plan(github_id)

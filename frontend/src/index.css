@@ -443,6 +443,30 @@ button { font-family: inherit; cursor: pointer; }
   border-radius: var(--radius-sm);
 }
 .plan-list { margin: 0; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.7rem; }
+
+/* start-to-finish phased overview */
+.plan-summary { color: var(--text-dim); font-size: 0.92rem; margin: 0 0 1.1rem; }
+.phase-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.phase {
+  position: relative;
+  padding: 0 0 1.1rem 1.4rem;
+  border-left: 2px solid var(--border);
+}
+.phase:last-child { border-left-color: transparent; padding-bottom: 0.2rem; }
+.phase::before {
+  content: ''; position: absolute; left: -6px; top: 3px;
+  width: 10px; height: 10px; border-radius: 999px;
+  background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.phase-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.7rem; }
+.phase-title { font-weight: 700; font-size: 0.95rem; color: var(--text); }
+.phase-dur { font-size: 0.75rem; color: var(--muted); white-space: nowrap; }
+.phase-focus { margin: 0.3rem 0 0.35rem; font-size: 0.88rem; color: var(--text-dim); }
+.phase-why { margin: 0; font-size: 0.85rem; color: var(--muted); }
+.why-label {
+  color: var(--accent); font-weight: 600; font-size: 0.7rem; text-transform: uppercase;
+  letter-spacing: 0.06em; margin-right: 0.4rem;
+}
 .plan-list li { color: var(--text-dim); }
 .plan-main { display: flex; align-items: center; gap: 0.6rem; }
 .plan-main span:first-child { color: var(--text); }

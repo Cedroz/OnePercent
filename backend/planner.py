@@ -58,6 +58,45 @@ def _resource_url(query):
     return f"https://www.youtube.com/results?search_query={quote_plus(query)}"
 
 
+# One phase of the big-picture, start-to-finish roadmap toward the goal.
+class Phase(BaseModel):
+    title: str        # e.g. "Phase 1: Core CS fundamentals"
+    focus: str        # what they concretely work on in this phase
+    why: str          # why this phase matters toward the goal
+    duration: str     # rough timeframe, e.g. "3-4 weeks"
+
+class Overview(BaseModel):
+    summary: str          # 1-2 sentence overall strategy
+    phases: list[Phase]
+
+
+def generate_overview(goal, context=""):
+    prompt = f"""You are a coding-career coach. Lay out a realistic START-TO-FINISH
+    roadmap for reaching this goal: "{goal}". Break the whole journey into 4 to 6
+    sequential phases, from where they are now to actually achieving the goal.
+
+    {context}
+
+    For each phase provide:
+    - "title": a short phase name (e.g. "Phase 1: Core CS fundamentals").
+    - "focus": what they concretely work on in this phase (1-2 sentences).
+    - "why": why this phase matters — how it moves them toward the goal (1-2 sentences).
+    - "duration": a rough timeframe (e.g. "3-4 weeks").
+    Also give "summary": 1-2 sentences describing the overall strategy.
+
+    Be realistic and specific to the goal and their current level."""
+    resp = _generate(prompt, {
+        "response_mime_type": "application/json",
+        "response_schema": Overview,
+    })
+    ov = resp.parsed
+    return {
+        "summary": ov.summary,
+        "phases": [{"title": p.title, "focus": p.focus, "why": p.why, "duration": p.duration}
+                   for p in ov.phases],
+    }
+
+
 def generate_roadmap(goal, context=""):
     prompt = f"""You are a coding-career coach. "{goal}" is a LONG-TERM goal that takes
     weeks or months of steady daily effort. Create just TODAY's small set of 3 to 4

@@ -333,23 +333,26 @@ function App() {
 
             {showPlan && (
               <div className="plan-panel">
-                <h3>Today's plan (from Gemini)</h3>
-                <ol className="plan-list">
-                  {tasks.map((t) => (
-                    <li key={t.id}>
-                      <div className="plan-main">
-                        <span>{t.title}</span>
-                        <span className="pts-badge">+{t.points}</span>
-                      </div>
-                      <div className="plan-meta">
-                        {t.metric && <span className="auto-tag">auto-tracked · {t.target} {t.metric}</span>}
-                        {t.resource_url && (
-                          <a href={t.resource_url} target="_blank" rel="noopener noreferrer">{linkLabel(t.resource_url)}</a>
-                        )}
-                      </div>
-                    </li>
-                  ))}
-                </ol>
+                <h3>Your path to this goal</h3>
+                {user.plan_overview ? (
+                  <>
+                    <p className="plan-summary">{user.plan_overview.summary}</p>
+                    <ol className="phase-list">
+                      {user.plan_overview.phases.map((ph, i) => (
+                        <li key={i} className="phase">
+                          <div className="phase-head">
+                            <span className="phase-title">{ph.title}</span>
+                            <span className="phase-dur">{ph.duration}</span>
+                          </div>
+                          <p className="phase-focus">{ph.focus}</p>
+                          <p className="phase-why"><span className="why-label">Why</span> {ph.why}</p>
+                        </li>
+                      ))}
+                    </ol>
+                  </>
+                ) : (
+                  <p className="muted">Set (or re-set) your goal to generate your step-by-step plan.</p>
+                )}
               </div>
             )}
 

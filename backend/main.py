@@ -1,5 +1,6 @@
 import os
 import time
+import json
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
@@ -167,6 +168,7 @@ async def me(request: Request):
         "name": profile.get("name"),
         "avatar_url": profile.get("avatar_url"),
         "big_goal": user.big_goal if user else None,
+        "plan_overview": json.loads(user.plan_overview) if user and user.plan_overview else None,
         "tracked_repo": user.tracked_repo if user else None,
         "plan_updated_at": user.plan_updated_at if user else None,
     }

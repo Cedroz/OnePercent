@@ -38,15 +38,23 @@ query getProblem($slug: String!) {
 }
 """
 
+# Problem metadata never changes, so cache successful lookups for the process
+# lifetime (detection looks up the same slugs repeatedly).
+_problem_cache = {}
+
 def fetch_problem(slug):
+    if slug in _problem_cache:
+        return _problem_cache[slug]
     try:
         resp = httpx.post(LEETCODE_URL, json={"query": PROBLEM_QUERY, "variables": {"slug": slug}})
         question = resp.json().get("data", {}).get("question")
     except Exception:
-        return None
+        return None   # transient error → don't cache, try again next time
     if not question:
         return None   # slug doesn't exist → don't trust the AI's link
-    return {"title": question["title"], "difficulty": question["difficulty"].lower()}
+    result = {"title": question["title"], "difficulty": question["difficulty"].lower()}
+    _problem_cache[slug] = result
+    return result
 
 
 # The user's most recent accepted submissions. LeetCode only exposes the latest

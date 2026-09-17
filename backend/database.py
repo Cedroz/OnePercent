@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from sqlmodel import SQLModel, create_engine, Session, select
 from models import User, Task, PointsLog, Snapshot
 from crypto import encrypt_token, decrypt_token
-from leetcode import fetch_leetcode_stats, fetch_recent_solves
+from leetcode import fetch_leetcode_stats, fetch_recent_ac, fetch_problem
 from github import count_repo_commits
 from planner import generate_roadmap
 
@@ -301,14 +301,23 @@ def run_detection(github_id):
     if current is None:
         return []                            # nothing connected → nothing to detect
 
-    # Recently accepted problems (by slug), for specific-problem tasks.
+    # Recent accepted problems, and how many of each difficulty were solved in the
+    # last 24h (looked up per problem, since the submission list has no difficulty).
     user = get_user(github_id)
-    recent_solves = fetch_recent_solves(user.leetcode_username) if user and user.leetcode_username else set()
+    recent = fetch_recent_ac(user.leetcode_username) if user and user.leetcode_username else []
+    recent_slugs = {p["slug"] for p in recent}
+    cutoff = time.time() - 86400
+    solved_recently = {"easy": 0, "medium": 0, "hard": 0}
+    for p in recent:
+        if p["timestamp"] >= cutoff:
+            prob = fetch_problem(p["slug"])
+            if prob and prob["difficulty"] in solved_recently:
+                solved_recently[prob["difficulty"]] += 1
 
     completed = []
     with Session(engine) as session:
-        # Any auto-detectable task not done yet: has a metric (count-based) OR a
-        # specific problem slug (solve-based).
+        # Any auto-detectable task not done yet: a specific problem (slug), a
+        # difficulty practice task (metric easy/medium/hard), or commits.
         tasks = session.exec(
             select(Task).where(
                 Task.github_id == github_id,
@@ -319,11 +328,16 @@ def run_detection(github_id):
             done = False
 
             # Specific problem → complete when it shows up in recent accepted solves.
-            if task.leetcode_slug and task.leetcode_slug in recent_solves:
+            if task.leetcode_slug and task.leetcode_slug in recent_slugs:
                 done = True
-            elif task.metric in current:
-                # Count-based: complete once the count rises target above the baseline.
-                count = current[task.metric]
+            elif task.metric in solved_recently:
+                # Practice task → complete once enough of that difficulty were solved
+                # in the last 24h (matches "solve N mediums today").
+                if solved_recently[task.metric] >= (task.target or 1):
+                    done = True
+            elif task.metric == "commits":
+                # Commits still use the baseline diff (no per-commit timestamp signal here).
+                count = current["commits"]
                 if task.baseline is None:
                     task.baseline = count        # first sighting → set the starting line
                     session.add(task)

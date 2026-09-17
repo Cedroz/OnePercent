@@ -178,7 +178,12 @@ function App() {
   // ---------- logged in: dashboard ----------
   const earnedPoints = tasks.filter((t) => t.completed).reduce((s, t) => s + t.points, 0)
   const totalPoints = tasks.reduce((s, t) => s + t.points, 0)
-  const progressPct = totalPoints ? Math.round((earnedPoints / totalPoints) * 100) : 0
+  // Progress to goal = points actually earned so far vs. the points that "complete"
+  // the goal. Starts at 0 and rises only as you finish tasks; ~500 pts = done, so one
+  // full day (~60 pts) ≈ 12% and a bit over a week of daily tasks reaches 100%.
+  const GOAL_TARGET_POINTS = 500
+  const lifetimeEarned = stats.history.reduce((s, h) => s + h.points, 0)
+  const goalProgress = Math.min(100, Math.round((lifetimeEarned / GOAL_TARGET_POINTS) * 100))
 
   return (
     <div className="dashboard">
@@ -193,12 +198,12 @@ function App() {
       {/* stat cards */}
       <div className="stats-row">
         <div className="stat-card">
-          <div className="stat-label">Points</div>
+          <div className="stat-label">Today's points</div>
           <div className="stat-value">{earnedPoints}<span className="unit">/ {totalPoints}</span></div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Progress to goal</div>
-          <div className="stat-value accent">{progressPct}<span className="unit">%</span></div>
+          <div className="stat-value accent">{goalProgress}<span className="unit">%</span></div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Current streak</div>
@@ -206,10 +211,14 @@ function App() {
         </div>
       </div>
 
-      {/* progress bar */}
+      {/* progress toward the whole goal (AI estimate) */}
       <div className="progress-wrap">
+        <div className="progress-label">
+          <span>Progress to goal</span>
+          <span>{goalProgress}% · today {earnedPoints}/{totalPoints}</span>
+        </div>
         <div className="progress-track">
-          <div className="progress-fill" style={{ width: `${progressPct}%` }} />
+          <div className="progress-fill" style={{ width: `${goalProgress}%` }} />
         </div>
       </div>
 

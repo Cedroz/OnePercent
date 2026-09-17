@@ -1,7 +1,10 @@
 import os
+import time
+import random
 from urllib.parse import quote_plus
 from dotenv import load_dotenv
 from google import genai
+from google.genai import errors as genai_errors
 from pydantic import BaseModel
 from leetcode import fetch_problem
 
@@ -12,6 +15,23 @@ MODEL = "gemini-3.6-flash"
 # not configured yet); the function fails at call time in that case.
 _key = os.getenv("GEMINI_API_KEY")
 client = genai.Client(api_key=_key) if _key else None
+
+# Transient Gemini failures we should retry (overloaded / rate-limited / gateway),
+# rather than letting a one-off blip kill a whole generation.
+_RETRYABLE = {429, 500, 502, 503, 504}
+
+def _generate(prompt, config, attempts=4):
+    # Call Gemini with exponential backoff + jitter on transient errors.
+    delay = 1.0
+    for i in range(attempts):
+        try:
+            return client.models.generate_content(model=MODEL, contents=prompt, config=config)
+        except genai_errors.APIError as e:
+            # Not transient, or out of attempts → give up and let the caller handle it.
+            if getattr(e, "code", None) not in _RETRYABLE or i == attempts - 1:
+                raise
+            time.sleep(delay + random.uniform(0, 0.5))   # jitter avoids thundering-herd
+            delay *= 2                                    # 1s → 2s → 4s
 
 
 # The shape of ONE task the AI must produce. Gemini fills a list of these.
@@ -39,41 +59,50 @@ def _resource_url(query):
 
 
 def generate_roadmap(goal, context=""):
-    prompt = f"""You are a coding-career coach. Create a fresh set of 5 to 8 concrete,
-    actionable DAILY tasks that move someone toward this goal: "{goal}".
+    prompt = f"""You are a coding-career coach. "{goal}" is a LONG-TERM goal that takes
+    weeks or months of steady daily effort. Create just TODAY's small set of 3 to 4
+    daily tasks — one day's worth of steady progress, NOT everything needed to reach
+    the goal.
 
     {context}
 
     Rules:
-    - Each task is one small, concrete action they can do today.
-    - Build on what they've already done (above): don't repeat finished work; pick
-    the sensible next steps and gradually increase difficulty.
+    - EVERY task must directly serve the goal "{goal}". If their past history (below)
+    is about a different topic, IGNORE that topic — use the history only to gauge their
+    level and avoid repeating work, NOT to choose subjects. (e.g. if the goal is a
+    general software / Google role, do not assign embedded/firmware/hardware tasks just
+    because they did them before.)
+    - Keep it SMALL and realistic for ONE day: 3 to 4 tasks, roughly 1 hour of focused
+    work total. Do not overload the day.
+    - Daily tasks are small, incremental, mostly repeatable practice and study — the
+    kind of thing you do again (a little harder) the next day. They are steps toward
+    the goal, never the finish line.
+    - Do NOT include one-time MILESTONE actions as daily tasks: no "apply to the job",
+    no full "mock interview", no "read the entire style guide". Those happen rarely, not
+    daily. At most ONE light study/reading task per day, and keep it small.
+    - Build on what they've already done (above): don't repeat finished work; pick the
+    sensible next step and gradually increase difficulty over time.
     - For GENERAL LeetCode practice: set "metric" to "easy", "medium", or "hard", and
-    "target" to the number of problems (e.g. 5), and leave "leetcode_slug" null. The
+    "target" to a small number of problems (1-3), and leave "leetcode_slug" null. The
     harder the practice, the lower the quantity.
-    - If the goal names a SPECIFIC company (e.g. Google, Rivian, Meta): recommend 1-3
-    SPECIFIC, well-known problems that company is known to ask (or very close variants).
-    For each, make its own task titled like "Solve LeetCode: <Problem Name>", set
-    "leetcode_slug" to the real URL slug (e.g. "two-sum", "lru-cache"), "metric" to its
-    difficulty, and "target" to 1. Only use real, famous problems — never invent slugs.
-    - For GitHub coding tasks (make progress on their project): set "metric" to
-    "commits" and "target" to a number of commits (e.g. 5). Auto-tracked against the
-    one repo they chose. Include at most one commits task.
-    - For any other task (read something, apply, mock interview): set "metric" and
-    "target" to null (checked off manually).
-    - "youtube_query": ONLY for a topic they likely have little experience with, give
-    a short search phrase for a beginner tutorial (e.g. "binary search tutorial for
+    - If the goal names a SPECIFIC company (e.g. Google, Rivian, Meta): include at most
+    1 or 2 SPECIFIC, well-known problems that company is known to ask (or very close
+    variants). For each, make its own task titled like "Solve LeetCode: <Problem Name>",
+    set "leetcode_slug" to the real URL slug (e.g. "two-sum", "lru-cache"), "metric" to
+    its difficulty, and "target" to 1. Only use real, famous problems — never invent slugs.
+    - For GitHub coding tasks (make progress on their project): set "metric" to "commits"
+    and "target" to a small number (1-3). Auto-tracked against their chosen repo. At most
+    one commits task.
+    - "youtube_query": ONLY for a topic they likely have little experience with, give a
+    short search phrase for a beginner tutorial (e.g. "binary search tutorial for
     beginners"). For familiar/simple tasks leave it null.
+    - Any non-tracked task sets "metric" and "target" to null (checked off manually).
     - "points": 10 for easy tasks, 15-20 for medium effort, 25+ for hard/big tasks.
-    - Make the mix realistic for the goal and their current level."""
-    resp = client.models.generate_content(
-        model=MODEL,
-        contents=prompt,
-        config={
-            "response_mime_type": "application/json",
-            "response_schema": list[PlannedTask],
-        },
-    )
+    - Make the mix realistic for one day at their current level."""
+    resp = _generate(prompt, {
+        "response_mime_type": "application/json",
+        "response_schema": list[PlannedTask],
+    })
     tasks = []
     for t in resp.parsed:
         metric = t.metric

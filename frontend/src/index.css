@@ -186,6 +186,13 @@ button { font-family: inherit; cursor: pointer; }
 
 /* progress bar */
 .progress-wrap { margin-bottom: 2rem; }
+.progress-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-bottom: 0.5rem;
+}
 .progress-track {
   height: 10px;
   background: var(--surface);

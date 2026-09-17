@@ -22,6 +22,7 @@ function App() {
   const [user, setUser] = useState(null)
   const [commits, setCommits] = useState([])
   const [leetcode, setLeetcode] = useState(null)
+  const [recentAc, setRecentAc] = useState([])
   const [usernameInput, setUsernameInput] = useState('')
   const [repos, setRepos] = useState([])
   const [repoInput, setRepoInput] = useState('')
@@ -46,6 +47,9 @@ function App() {
 
     const lcRes = await fetch(`${API_URL}/api/leetcode`, { credentials: 'include' })
     setLeetcode(await lcRes.json())
+
+    const recentRes = await fetch(`${API_URL}/api/leetcode/recent`, { credentials: 'include' })
+    setRecentAc((await recentRes.json()).recent)
 
     const reposRes = await fetch(`${API_URL}/api/repos`, { credentials: 'include' })
     setRepos(await reposRes.json())
@@ -408,6 +412,20 @@ function App() {
                 <div className="lc-stat hard"><div className="n">{leetcode.stats?.Hard ?? 0}</div><div className="l">Hard</div></div>
                 <div className="lc-stat total"><div className="n">{leetcode.stats?.All ?? 0}</div><div className="l">Total</div></div>
               </div>
+
+              {recentAc.length > 0 && (
+                <>
+                  <h3>Recently solved</h3>
+                  <ul className="recent-list">
+                    {recentAc.map((p) => (
+                      <li key={p.slug}>
+                        <a href={p.url} target="_blank" rel="noopener noreferrer">{p.title}</a>
+                        <span className="when">{new Date(p.timestamp * 1000).toLocaleDateString()}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
             </>
           ) : (
             <form className="lc-form" onSubmit={saveUsername}>

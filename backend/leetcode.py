@@ -55,16 +55,37 @@ def fetch_problem(slug):
 RECENT_QUERY = """
 query recentAc($username: String!, $limit: Int!) {
   recentAcSubmissionList(username: $username, limit: $limit) {
+    title
     titleSlug
+    timestamp
   }
 }
 """
 
-def fetch_recent_solves(username, limit=20):
+def fetch_recent_ac(username, limit=20):
+    # Recent accepted problems, most recent first, de-duplicated by slug (the same
+    # problem can be AC'd multiple times). Each item carries a direct problem link.
     try:
         resp = httpx.post(LEETCODE_URL, json={"query": RECENT_QUERY,
                                               "variables": {"username": username, "limit": limit}})
         subs = resp.json().get("data", {}).get("recentAcSubmissionList") or []
     except Exception:
-        return set()
-    return {s["titleSlug"] for s in subs}
+        return []
+    seen = set()
+    out = []
+    for s in subs:
+        slug = s["titleSlug"]
+        if slug in seen:
+            continue
+        seen.add(slug)
+        out.append({
+            "title": s["title"],
+            "slug": slug,
+            "url": f"https://leetcode.com/problems/{slug}/",
+            "timestamp": int(s["timestamp"]),
+        })
+    return out
+
+def fetch_recent_solves(username, limit=20):
+    # Just the slugs, for detection matching.
+    return {a["slug"] for a in fetch_recent_ac(username, limit)}

@@ -9,7 +9,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from authlib.integrations.starlette_client import OAuth
 from database import save_user, get_user, save_leetcode_stats, set_leetcode_username, set_tracked_repo, get_tasks, complete_task, get_points_log, get_streak, get_all_user_ids, run_detection, set_goal_and_plan, regenerate_stale_plans
 from pydantic import BaseModel
-from leetcode import fetch_leetcode_stats
+from leetcode import fetch_leetcode_stats, fetch_recent_ac
 from crypto import decrypt_token
 
 class LeetCodeUsername(BaseModel):
@@ -305,6 +305,18 @@ def stats_endpoint(request: Request):
     if user_id is None:
         raise HTTPException(401, "Not logged in")
     return {"streak": get_streak(user_id), "history": get_points_log(user_id)}
+
+
+# The user's most recent accepted LeetCode problems, for display in the app.
+@app.get("/api/leetcode/recent")
+def leetcode_recent(request: Request):
+    user_id = request.session.get("user_id")
+    if user_id is None:
+        raise HTTPException(401, "Not logged in")
+    user = get_user(user_id)
+    if user is None or user.leetcode_username is None:
+        return {"recent": []}
+    return {"recent": fetch_recent_ac(user.leetcode_username)}
 
 
 # On-demand detection for the logged-in user — lets the dashboard sync their

@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 from authlib.integrations.starlette_client import OAuth, OAuthError
+from google.genai import errors as genai_errors
 from database import save_user, get_user, delete_user_data, save_leetcode_stats, set_leetcode_username, set_tracked_repo, get_tasks, complete_task, get_points_log, get_streak, get_all_user_ids, run_detection, set_goal_and_plan, regenerate_stale_plans, refresh_plan_if_stale
 from pydantic import BaseModel
 from leetcode import fetch_leetcode_stats, fetch_recent_ac
@@ -182,7 +183,14 @@ def set_goal(body: Goal, request: Request):
     user_id = request.session.get("user_id")
     if user_id is None:
         raise HTTPException(status_code=401, detail="Not logged in")
-    tasks = set_goal_and_plan(user_id, body.goal)
+    try:
+        tasks = set_goal_and_plan(user_id, body.goal)
+    except genai_errors.APIError:
+        # Rate-limited (free tier is ~20/day) or the model is overloaded.
+        raise HTTPException(
+            status_code=503,
+            detail="The AI is busy or hit its daily limit. Please try again in a bit.",
+        )
     return {"tasks": tasks}
 
 

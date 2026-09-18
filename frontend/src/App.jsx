@@ -30,6 +30,7 @@ function App() {
   const [stats, setStats] = useState({ streak: 0, history: [] })
   const [goalInput, setGoalInput] = useState('')
   const [generating, setGenerating] = useState(false)
+  const [genError, setGenError] = useState('')
   const [savingUsername, setSavingUsername] = useState(false)
   const [savingRepo, setSavingRepo] = useState(false)
   const [syncing, setSyncing] = useState(false)
@@ -173,6 +174,7 @@ function App() {
   async function setGoal(e) {
     e.preventDefault()
     setGenerating(true)
+    setGenError('')
     try {
       const res = await fetch(`${API_URL}/api/goal`, {
         method: 'POST',
@@ -180,17 +182,20 @@ function App() {
         credentials: 'include',
         body: JSON.stringify({ goal: goalInput }),
       })
-      if (!res.ok) throw new Error(`Server returned ${res.status}`)
+      if (!res.ok) {
+        // Surface the backend's reason (e.g. AI daily limit) instead of failing silently.
+        let msg = 'Could not generate your roadmap. Please try again.'
+        try { const err = await res.json(); if (err.detail) msg = err.detail } catch {}
+        throw new Error(msg)
+      }
       const data = await res.json()
       setTasks(data.tasks)
-      // Stamp plan time locally so the countdown starts right away (the backend
-      // just set it to ~now); a later loadData will sync the exact value.
-      setUser({ ...user, big_goal: goalInput, plan_updated_at: Date.now() / 1000 })
+      // Stamp times locally so the countdown + progress reflect the new goal at once.
+      setUser({ ...user, big_goal: goalInput, plan_updated_at: Date.now() / 1000, goal_started_at: Date.now() / 1000 })
     } catch (err) {
-      // The response may have been lost even though the backend saved the roadmap
-      // (slow AI call / serverless timeout). Re-sync from the server so a stuck
-      // spinner self-heals into the real state instead of needing a manual refresh.
-      console.error('Goal generation failed (re-syncing):', err)
+      // Generation is atomic (nothing saved on failure), so show why and stay on the form.
+      console.error('Goal generation failed:', err)
+      setGenError(err.message)
       await loadData()
     } finally {
       setGenerating(false)   // ALWAYS runs, success or failure → spinner can't get stuck
@@ -307,6 +312,7 @@ function App() {
         ) : !user.big_goal ? (
           // No goal yet → ask for it; the AI builds the roadmap.
           <form className="lc-form" onSubmit={setGoal}>
+            {genError && <p className="form-error">{genError}</p>}
             <label>What are you working toward? The AI builds your roadmap from it.</label>
             <input
               className="input"

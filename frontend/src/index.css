@@ -384,6 +384,11 @@ button { font-family: inherit; cursor: pointer; }
 .btn-primary:disabled { opacity: 0.55; cursor: not-allowed; filter: none; transform: none; }
 
 .muted { color: var(--muted); font-size: 0.9rem; }
+.form-error {
+  margin: 0 0 0.3rem; font-size: 0.88rem; color: var(--hard);
+  background: rgba(242, 80, 110, 0.1); border: 1px solid rgba(242, 80, 110, 0.3);
+  padding: 0.5rem 0.7rem; border-radius: 8px;
+}
 .loading { min-height: 100vh; display: flex; align-items: center; justify-content: center; color: var(--muted); }
 
 /* AI generating spinner */

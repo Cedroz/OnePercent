@@ -121,22 +121,29 @@ def replace_tasks(github_id, tasks):
 
 
 def set_goal_and_plan(github_id, goal):
-    # Save the goal + a start-to-finish overview, then build the first daily plan.
-    # The overview is generated once here (stable), not on every daily refresh.
+    # Generate FIRST so an AI failure (quota/overload) doesn't half-save a goal with
+    # no tasks. The overview is optional (stable, generated once); the daily plan is
+    # required — if it raises, nothing is persisted and the caller surfaces the error.
+    context = _progress_context(github_id)
     try:
-        overview = json.dumps(generate_overview(goal))
+        overview = generate_overview(goal)
     except Exception:
-        overview = None   # don't let an overview hiccup block goal-setting
+        overview = None   # overview is a nice-to-have; don't block on it
+    tasks = generate_roadmap(goal, context, overview)   # may raise → caller handles
+
+    now = time.time()
     with Session(engine) as session:
         user = session.exec(select(User).where(User.github_id == github_id)).first()
         if user is None:
             return []
         user.big_goal = goal
-        user.plan_overview = overview
-        user.goal_started_at = time.time()   # progress resets: counts from now on
+        user.plan_overview = json.dumps(overview) if overview else None
+        user.goal_started_at = now   # progress resets: counts from now on
+        user.plan_updated_at = now
         session.add(user)
         session.commit()
-    return regenerate_plan(github_id)
+    replace_tasks(github_id, tasks)
+    return get_tasks(github_id)
 
 
 def _progress_context(github_id):

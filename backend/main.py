@@ -117,14 +117,13 @@ def ping():
 # so the user's browser gets bounced to GitHub's "Authorize OnePercent?" page.
 @app.get("/auth/login")
 async def login(request: Request):
-    # Drop any stale OAuth state first — Authlib appends a new state to the session
-    # each login, and accumulated entries bloat the cookie past ~4KB (browser drops
-    # it → mismatching_state). Clearing keeps exactly one small state per attempt.
+    # Drop any stale OAuth state first — Authlib appends a new state each login and
+    # accumulated entries bloat the cookie (browser drops it → mismatching_state).
     request.session.clear()
-    # Callback comes back through the FRONTEND origin (dev: Vite proxy; prod: Vercel
-    # rewrite), so the whole flow stays on ONE origin and the session cookie survives.
-    # Dev → http://localhost:5173/auth/callback ; prod → https://<frontend>/auth/callback.
-    redirect_uri = f"{FRONTEND_URL}/auth/callback"
+    # The whole login flow (login → GitHub → callback) must stay on ONE domain so the
+    # state cookie is first-party throughout. In prod that's the BACKEND domain
+    # (set OAUTH_REDIRECT_URI); in dev it's localhost via the Vite proxy.
+    redirect_uri = os.getenv("OAUTH_REDIRECT_URI") or f"{FRONTEND_URL}/auth/callback"
     return await oauth.github.authorize_redirect(request, redirect_uri)
 
 
@@ -133,33 +132,26 @@ async def login(request: Request):
 # real handshake completes.
 @app.get("/auth/callback")
 async def callback(request: Request):
-  # TEMP: full diagnostic — surface whatever fails (state, token, profile, DB).
-  from fastapi.responses import PlainTextResponse
-  import traceback
-  start_session = list(request.session.keys())   # what the cookie decoded to, pre-Authlib
-  try:
     # Authlib checks the returned `state` against the one saved in our session
-    # cookie (CSRF guard), then POSTs the `code` + our client_secret to GitHub.
-    token = await oauth.github.authorize_access_token(request)
+    # cookie (CSRF guard), then POSTs the `code` + client_secret to GitHub.
+    try:
+        token = await oauth.github.authorize_access_token(request)
+    except OAuthError:
+        # State mismatch / stale login → bounce back to log in again (not a 500).
+        return RedirectResponse(FRONTEND_URL)
 
     # Use that token to call GitHub's API and fetch the logged-in user's profile.
     resp = await oauth.github.get("user", token=token)
     profile = resp.json()
 
     github_id = profile["id"]
+    # Store the token SERVER-SIDE, keyed by GitHub id. It never goes to the browser.
     save_user(github_id, token["access_token"])
+    # Remember who this browser is: put the (non-secret) user id in the signed cookie.
     request.session["user_id"] = github_id
-    # Confirm the session actually took before redirecting.
-    return PlainTextResponse(f"OK user_id={github_id} session={dict(request.session)}")
-  except Exception:
-    return PlainTextResponse(
-        f"returned_state={request.query_params.get('state')}\n"
-        f"start_session_keys={start_session}\n"
-        f"session_keys_now={list(request.session.keys())}\n"
-        f"cookies_seen={list(request.cookies.keys())}\n\n"
-        + traceback.format_exc(),
-        status_code=500,
-    )
+
+    # Send the user back to the frontend — they're now logged in.
+    return RedirectResponse(FRONTEND_URL)
 
 
 # Helper: pull the current user's token from the session, or reject with 401.

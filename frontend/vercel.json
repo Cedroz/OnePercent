@@ -1,6 +1,0 @@
-{
-  "rewrites": [
-    { "source": "/api/:path*", "destination": "https://one-percent-zeta.vercel.app/api/:path*" },
-    { "source": "/auth/:path*", "destination": "https://one-percent-zeta.vercel.app/auth/:path*" }
-  ]
-}

@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 from authlib.integrations.starlette_client import OAuth, OAuthError
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from google.genai import errors as genai_errors
 from database import save_user, get_user, delete_user_data, save_leetcode_stats, set_leetcode_username, set_tracked_repo, get_tasks, complete_task, get_points_log, get_streak, get_all_user_ids, run_detection, set_goal_and_plan, regenerate_stale_plans, refresh_plan_if_stale
 from pydantic import BaseModel
@@ -145,21 +146,42 @@ async def callback(request: Request):
     profile = resp.json()
 
     github_id = profile["id"]
-    # Store the token SERVER-SIDE, keyed by GitHub id. It never goes to the browser.
+    # Store the GitHub token SERVER-SIDE, encrypted. It never goes to the browser.
     save_user(github_id, token["access_token"])
-    # Remember who this browser is: put the (non-secret) user id in the signed cookie.
-    request.session["user_id"] = github_id
+    # Hand the frontend a signed session token in the URL fragment (#). The frontend
+    # and API are on different domains, so a cross-site cookie would be blocked;
+    # instead the frontend stores this and sends it as an Authorization header.
+    session_token = create_session_token(github_id)
+    return RedirectResponse(f"{FRONTEND_URL}/#token={session_token}")
 
-    # Send the user back to the frontend — they're now logged in.
-    return RedirectResponse(FRONTEND_URL)
+
+# --- Session tokens (Bearer, not cookies — the two domains can't share a cookie) ---
+# Signed with SESSION_SECRET so they can't be forged; expire after 7 days.
+_serializer = URLSafeTimedSerializer(
+    os.getenv("SESSION_SECRET", "dev-only-insecure-placeholder"), salt="op-session"
+)
+TOKEN_MAX_AGE = 7 * 24 * 3600
+
+def create_session_token(user_id):
+    return _serializer.dumps({"user_id": user_id})
+
+def current_user_id(request: Request):
+    # Read + verify the Bearer token from the Authorization header; None if absent/bad.
+    auth = request.headers.get("authorization", "")
+    if not auth.startswith("Bearer "):
+        return None
+    try:
+        data = _serializer.loads(auth[7:], max_age=TOKEN_MAX_AGE)
+    except (BadSignature, SignatureExpired):
+        return None
+    return data.get("user_id")
 
 
-# Helper: pull the current user's token from the session, or reject with 401.
-# Any endpoint that needs GitHub access calls this first.
+# Helper: resolve the logged-in user's GitHub token, or reject with 401.
 def require_login(request: Request):
-    user_id = request.session.get("user_id")
-    user = get_user(user_id)
-    if user_id is None or user is None:
+    user_id = current_user_id(request)
+    user = get_user(user_id) if user_id is not None else None
+    if user is None:
         raise HTTPException(status_code=401, detail="Not logged in")
     return {"access_token": decrypt_token(user.github_token), "token_type": "bearer"}
 
@@ -171,7 +193,7 @@ def require_login(request: Request):
 async def me(request: Request):
     token = require_login(request)
     profile = (await oauth.github.get("user", token=token)).json()
-    user = get_user(request.session.get("user_id"))
+    user = get_user(current_user_id(request))
     return {
         "login": profile["login"],
         "name": profile.get("name"),
@@ -188,7 +210,7 @@ async def me(request: Request):
 # Gemini is called here only (never on page load).
 @app.post("/api/goal")
 def set_goal(body: Goal, request: Request):
-    user_id = request.session.get("user_id")
+    user_id = current_user_id(request)
     if user_id is None:
         raise HTTPException(status_code=401, detail="Not logged in")
     try:
@@ -257,7 +279,7 @@ async def get_repos(request: Request):
 
 @app.post("/api/leetcode/username")
 def set_leetcode(body: LeetCodeUsername, request: Request):
-    user_id = request.session.get("user_id")
+    user_id = current_user_id(request)
     if user_id is None:
         raise HTTPException(401, "Not logged in")
     set_leetcode_username(user_id, body.username)
@@ -266,7 +288,7 @@ def set_leetcode(body: LeetCodeUsername, request: Request):
 # Pick the one repo whose commits get auto-tracked toward "make N commits" tasks.
 @app.post("/api/github/repo")
 def set_repo(body: TrackedRepo, request: Request):
-    user_id = request.session.get("user_id")
+    user_id = current_user_id(request)
     if user_id is None:
         raise HTTPException(401, "Not logged in")
     set_tracked_repo(user_id, body.repo)
@@ -282,7 +304,7 @@ def logout(request: Request):
 
 @app.post("/api/leetcode/disconnect")
 def disconnect_leetcode(request: Request):
-    user_id = request.session.get("user_id")
+    user_id = current_user_id(request)
     if user_id is None:
         raise HTTPException(401, "Not logged in")
     set_leetcode_username(user_id, None)
@@ -290,7 +312,7 @@ def disconnect_leetcode(request: Request):
 
 @app.post("/api/github/repo/disconnect")
 def disconnect_repo(request: Request):
-    user_id = request.session.get("user_id")
+    user_id = current_user_id(request)
     if user_id is None:
         raise HTTPException(401, "Not logged in")
     set_tracked_repo(user_id, None)
@@ -298,7 +320,7 @@ def disconnect_repo(request: Request):
 
 @app.post("/api/account/delete")
 def delete_account(request: Request):
-    user_id = request.session.get("user_id")
+    user_id = current_user_id(request)
     if user_id is None:
         raise HTTPException(401, "Not logged in")
     delete_user_data(user_id)   # wipe all data + the account row
@@ -307,7 +329,7 @@ def delete_account(request: Request):
 
 @app.get("/api/leetcode")
 def get_leetcode(request: Request):
-    user_id = request.session.get("user_id")
+    user_id = current_user_id(request)
     if user_id is None:
         raise HTTPException(401, "Not logged in")
     user = get_user(user_id)
@@ -336,7 +358,7 @@ def get_leetcode(request: Request):
 # The user's task list (seeds the starter roadmap on first call).
 @app.get("/api/tasks")
 def tasks_endpoint(request: Request):
-    user_id = request.session.get("user_id")
+    user_id = current_user_id(request)
     if user_id is None:
         raise HTTPException(401, "Not logged in")
     return {"tasks": get_tasks(user_id)}
@@ -346,7 +368,7 @@ def tasks_endpoint(request: Request):
 # the URL and passes it in as `task_id`.
 @app.post("/api/tasks/{task_id}/complete")
 def complete_task_endpoint(task_id: int, request: Request):
-    user_id = request.session.get("user_id")
+    user_id = current_user_id(request)
     if user_id is None:
         raise HTTPException(401, "Not logged in")
     result = complete_task(user_id, task_id)
@@ -358,7 +380,7 @@ def complete_task_endpoint(task_id: int, request: Request):
 # Streak (consecutive active days) + points history, from the points_log.
 @app.get("/api/stats")
 def stats_endpoint(request: Request):
-    user_id = request.session.get("user_id")
+    user_id = current_user_id(request)
     if user_id is None:
         raise HTTPException(401, "Not logged in")
     return {"streak": get_streak(user_id), "history": get_points_log(user_id)}
@@ -368,7 +390,7 @@ def stats_endpoint(request: Request):
 # this on load so tasks refresh at midnight PT without waiting for the cron.
 @app.post("/api/plan/refresh")
 def plan_refresh(request: Request):
-    user_id = request.session.get("user_id")
+    user_id = current_user_id(request)
     if user_id is None:
         raise HTTPException(401, "Not logged in")
     regenerated = refresh_plan_if_stale(user_id)
@@ -378,7 +400,7 @@ def plan_refresh(request: Request):
 # The user's most recent accepted LeetCode problems, for display in the app.
 @app.get("/api/leetcode/recent")
 def leetcode_recent(request: Request):
-    user_id = request.session.get("user_id")
+    user_id = current_user_id(request)
     if user_id is None:
         raise HTTPException(401, "Not logged in")
     user = get_user(user_id)
@@ -391,7 +413,7 @@ def leetcode_recent(request: Request):
 # LeetCode/GitHub activity immediately instead of waiting for the daily cron.
 @app.post("/api/detect")
 def detect_me(request: Request):
-    user_id = request.session.get("user_id")
+    user_id = current_user_id(request)
     if user_id is None:
         raise HTTPException(401, "Not logged in")
     completed = run_detection(user_id)

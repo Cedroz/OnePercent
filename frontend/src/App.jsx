@@ -4,6 +4,21 @@ import { useState, useEffect } from 'react'
 // In production it's the full backend URL (set in Vercel).
 const API_URL = import.meta.env.VITE_API_URL || ''
 
+// fetch wrapper that attaches our Bearer token. The frontend and API are on
+// different domains, so a cross-site cookie would be blocked — we send a signed
+// token (from localStorage) in the Authorization header instead.
+function authFetch(url, options = {}) {
+  const token = localStorage.getItem('op_token')
+  return fetch(url, {
+    ...options,
+    credentials: 'include',
+    headers: {
+      ...(options.headers || {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  })
+}
+
 // A LeetCode problem link says "solve"; a YouTube tutorial search says "tutorial".
 function linkLabel(url) {
   return url && url.includes('leetcode.com/problems') ? 'solve ↗' : 'tutorial ↗'
@@ -41,33 +56,40 @@ function App() {
   const [loading, setLoading] = useState(true)
 
   async function loadData() {
-    const meRes = await fetch(`${API_URL}/api/me`, { credentials: 'include' })
+    const meRes = await authFetch(`${API_URL}/api/me`, { credentials: 'include' })
     if (!meRes.ok) { setUser(null); return }
     setUser(await meRes.json())
 
     // Roll the plan over if a new Pacific day started, before we load the tasks.
-    await fetch(`${API_URL}/api/plan/refresh`, { method: 'POST', credentials: 'include' })
+    await authFetch(`${API_URL}/api/plan/refresh`, { method: 'POST', credentials: 'include' })
 
-    const commitsRes = await fetch(`${API_URL}/api/commits`, { credentials: 'include' })
+    const commitsRes = await authFetch(`${API_URL}/api/commits`, { credentials: 'include' })
     setCommits((await commitsRes.json()).commits)
 
-    const lcRes = await fetch(`${API_URL}/api/leetcode`, { credentials: 'include' })
+    const lcRes = await authFetch(`${API_URL}/api/leetcode`, { credentials: 'include' })
     setLeetcode(await lcRes.json())
 
-    const recentRes = await fetch(`${API_URL}/api/leetcode/recent`, { credentials: 'include' })
+    const recentRes = await authFetch(`${API_URL}/api/leetcode/recent`, { credentials: 'include' })
     setRecentAc((await recentRes.json()).recent)
 
-    const reposRes = await fetch(`${API_URL}/api/repos`, { credentials: 'include' })
+    const reposRes = await authFetch(`${API_URL}/api/repos`, { credentials: 'include' })
     setRepos(await reposRes.json())
 
-    const tasksRes = await fetch(`${API_URL}/api/tasks`, { credentials: 'include' })
+    const tasksRes = await authFetch(`${API_URL}/api/tasks`, { credentials: 'include' })
     setTasks((await tasksRes.json()).tasks)
 
-    const statsRes = await fetch(`${API_URL}/api/stats`, { credentials: 'include' })
+    const statsRes = await authFetch(`${API_URL}/api/stats`, { credentials: 'include' })
     setStats(await statsRes.json())
   }
 
   useEffect(() => {
+    // After login the backend redirects here with the session token in the URL
+    // fragment (#token=...). Save it, then strip it from the URL so it isn't left
+    // in the address bar / history.
+    if (window.location.hash.startsWith('#token=')) {
+      localStorage.setItem('op_token', window.location.hash.slice('#token='.length))
+      history.replaceState(null, '', window.location.pathname + window.location.search)
+    }
     // Load the dashboard, then auto-sync LeetCode/GitHub activity once so tasks
     // reflect anything solved/committed recently without waiting for the cron.
     loadData()
@@ -80,10 +102,10 @@ function App() {
   async function syncProgress() {
     setSyncing(true)
     try {
-      await fetch(`${API_URL}/api/detect`, { method: 'POST', credentials: 'include' })
-      const tasksRes = await fetch(`${API_URL}/api/tasks`, { credentials: 'include' })
+      await authFetch(`${API_URL}/api/detect`, { method: 'POST', credentials: 'include' })
+      const tasksRes = await authFetch(`${API_URL}/api/tasks`, { credentials: 'include' })
       setTasks((await tasksRes.json()).tasks)
-      const statsRes = await fetch(`${API_URL}/api/stats`, { credentials: 'include' })
+      const statsRes = await authFetch(`${API_URL}/api/stats`, { credentials: 'include' })
       setStats(await statsRes.json())
     } finally {
       setSyncing(false)
@@ -117,7 +139,7 @@ function App() {
     e.preventDefault()
     setSavingUsername(true)
     try {
-      await fetch(`${API_URL}/api/leetcode/username`, {
+      await authFetch(`${API_URL}/api/leetcode/username`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -134,7 +156,7 @@ function App() {
     e.preventDefault()
     setSavingRepo(true)
     try {
-      await fetch(`${API_URL}/api/github/repo`, {
+      await authFetch(`${API_URL}/api/github/repo`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -148,25 +170,26 @@ function App() {
 
   async function completeTask(id) {
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, completed: true } : t)))
-    await fetch(`${API_URL}/api/tasks/${id}/complete`, { method: 'POST', credentials: 'include' })
-    const statsRes = await fetch(`${API_URL}/api/stats`, { credentials: 'include' })
+    await authFetch(`${API_URL}/api/tasks/${id}/complete`, { method: 'POST', credentials: 'include' })
+    const statsRes = await authFetch(`${API_URL}/api/stats`, { credentials: 'include' })
     setStats(await statsRes.json())
   }
 
   // --- account / settings actions ---
-  async function logout() {
-    await fetch(`${API_URL}/auth/logout`, { method: 'POST', credentials: 'include' })
-    setUser(null)   // back to the login screen
+  function logout() {
+    localStorage.removeItem('op_token')   // drop the token → logged out
+    setUser(null)                          // back to the login screen
   }
 
   async function disconnect(path) {
-    await fetch(`${API_URL}${path}`, { method: 'POST', credentials: 'include' })
+    await authFetch(`${API_URL}${path}`, { method: 'POST', credentials: 'include' })
     await loadData()
   }
 
   async function deleteAccount() {
     if (!window.confirm('Delete your account and all data? This cannot be undone.')) return
-    await fetch(`${API_URL}/api/account/delete`, { method: 'POST', credentials: 'include' })
+    await authFetch(`${API_URL}/api/account/delete`, { method: 'POST', credentials: 'include' })
+    localStorage.removeItem('op_token')
     setUser(null)
   }
 
@@ -176,7 +199,7 @@ function App() {
     setGenerating(true)
     setGenError('')
     try {
-      const res = await fetch(`${API_URL}/api/goal`, {
+      const res = await authFetch(`${API_URL}/api/goal`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',

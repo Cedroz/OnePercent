@@ -67,6 +67,8 @@ app.add_middleware(
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.getenv("SESSION_SECRET", "dev-only-insecure-placeholder"),
+    same_site="lax",                        # same-origin flow (dev proxy / prod rewrite)
+    https_only=bool(os.getenv("VERCEL")),   # Secure cookie in prod (Vercel sets VERCEL=1)
 )
 
 # --- OAuth (GitHub) ---
@@ -111,9 +113,10 @@ def ping():
 # so the user's browser gets bounced to GitHub's "Authorize OnePercent?" page.
 @app.get("/auth/login")
 async def login(request: Request):
-    # Callback comes back through the frontend origin (Vite proxies it to us),
-    # so the whole flow stays on ONE origin and the session cookie survives.
-    redirect_uri = "http://localhost:5173/auth/callback"
+    # Callback comes back through the FRONTEND origin (dev: Vite proxy; prod: Vercel
+    # rewrite), so the whole flow stays on ONE origin and the session cookie survives.
+    # Dev → http://localhost:5173/auth/callback ; prod → https://<frontend>/auth/callback.
+    redirect_uri = f"{FRONTEND_URL}/auth/callback"
     return await oauth.github.authorize_redirect(request, redirect_uri)
 
 

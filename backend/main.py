@@ -147,7 +147,13 @@ async def callback(request: Request):
     # Confirm the session actually took before redirecting.
     return PlainTextResponse(f"OK user_id={github_id} session={dict(request.session)}")
   except Exception:
-    return PlainTextResponse(traceback.format_exc(), status_code=500)
+    return PlainTextResponse(
+        f"returned_state={request.query_params.get('state')}\n"
+        f"session_keys={list(request.session.keys())}\n"
+        f"cookies_seen={list(request.cookies.keys())}\n\n"
+        + traceback.format_exc(),
+        status_code=500,
+    )
 
 
 # Helper: pull the current user's token from the session, or reject with 401.

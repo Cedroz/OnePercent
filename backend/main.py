@@ -129,28 +129,25 @@ async def login(request: Request):
 # real handshake completes.
 @app.get("/auth/callback")
 async def callback(request: Request):
+  # TEMP: full diagnostic — surface whatever fails (state, token, profile, DB).
+  from fastapi.responses import PlainTextResponse
+  import traceback
+  try:
     # Authlib checks the returned `state` against the one saved in our session
-    # cookie (CSRF guard), then POSTs the `code` + our client_secret to GitHub
-    # and gets back an access token. All the sensitive bits happen server-side.
-    try:
-        token = await oauth.github.authorize_access_token(request)
-    except OAuthError:
-        # State mismatch / stale or reused login link → don't 500. Send them back
-        # to log in again (a fresh /auth/login clears state and issues a new one).
-        return RedirectResponse(FRONTEND_URL)
+    # cookie (CSRF guard), then POSTs the `code` + our client_secret to GitHub.
+    token = await oauth.github.authorize_access_token(request)
 
     # Use that token to call GitHub's API and fetch the logged-in user's profile.
     resp = await oauth.github.get("user", token=token)
     profile = resp.json()
 
     github_id = profile["id"]
-    # Store the token SERVER-SIDE, keyed by GitHub id. It never goes to the browser.
     save_user(github_id, token["access_token"])
-    # Remember who this browser is: put the (non-secret) user id in the signed cookie.
     request.session["user_id"] = github_id
-
-    # Send the user back to the frontend — they're now logged in (session cookie set).
-    return RedirectResponse(FRONTEND_URL)
+    # Confirm the session actually took before redirecting.
+    return PlainTextResponse(f"OK user_id={github_id} session={dict(request.session)}")
+  except Exception:
+    return PlainTextResponse(traceback.format_exc(), status_code=500)
 
 
 # Helper: pull the current user's token from the session, or reject with 401.

@@ -132,6 +132,7 @@ async def callback(request: Request):
   # TEMP: full diagnostic — surface whatever fails (state, token, profile, DB).
   from fastapi.responses import PlainTextResponse
   import traceback
+  start_session = list(request.session.keys())   # what the cookie decoded to, pre-Authlib
   try:
     # Authlib checks the returned `state` against the one saved in our session
     # cookie (CSRF guard), then POSTs the `code` + our client_secret to GitHub.
@@ -149,7 +150,8 @@ async def callback(request: Request):
   except Exception:
     return PlainTextResponse(
         f"returned_state={request.query_params.get('state')}\n"
-        f"session_keys={list(request.session.keys())}\n"
+        f"start_session_keys={start_session}\n"
+        f"session_keys_now={list(request.session.keys())}\n"
         f"cookies_seen={list(request.cookies.keys())}\n\n"
         + traceback.format_exc(),
         status_code=500,

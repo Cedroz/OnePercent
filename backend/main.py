@@ -106,6 +106,16 @@ def ping():
     return {"status": "ok"}
 
 
+# TEMP diagnostic: does the session cookie reach the backend through the rewrite?
+@app.get("/api/debug/session")
+def debug_session(request: Request):
+    return {
+        "cookies_seen": list(request.cookies.keys()),
+        "session_keys": list(request.session.keys()),
+        "on_vercel": bool(os.getenv("VERCEL")),
+    }
+
+
 # --- OAuth: step 1-2 of the dance ---
 # The user hits this. We tell Authlib "start the GitHub login," passing the
 # callback URL GitHub should return them to. Authlib builds the GitHub authorize

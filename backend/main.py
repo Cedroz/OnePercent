@@ -106,16 +106,6 @@ def ping():
     return {"status": "ok"}
 
 
-# TEMP diagnostic: does the session cookie reach the backend through the rewrite?
-@app.get("/api/debug/session")
-def debug_session(request: Request):
-    return {
-        "cookies_seen": list(request.cookies.keys()),
-        "session_keys": list(request.session.keys()),
-        "on_vercel": bool(os.getenv("VERCEL")),
-    }
-
-
 # --- OAuth: step 1-2 of the dance ---
 # The user hits this. We tell Authlib "start the GitHub login," passing the
 # callback URL GitHub should return them to. Authlib builds the GitHub authorize
@@ -123,6 +113,10 @@ def debug_session(request: Request):
 # so the user's browser gets bounced to GitHub's "Authorize OnePercent?" page.
 @app.get("/auth/login")
 async def login(request: Request):
+    # Drop any stale OAuth state first — Authlib appends a new state to the session
+    # each login, and accumulated entries bloat the cookie past ~4KB (browser drops
+    # it → mismatching_state). Clearing keeps exactly one small state per attempt.
+    request.session.clear()
     # Callback comes back through the FRONTEND origin (dev: Vite proxy; prod: Vercel
     # rewrite), so the whole flow stays on ONE origin and the session cookie survives.
     # Dev → http://localhost:5173/auth/callback ; prod → https://<frontend>/auth/callback.
@@ -140,10 +134,10 @@ async def callback(request: Request):
     # and gets back an access token. All the sensitive bits happen server-side.
     try:
         token = await oauth.github.authorize_access_token(request)
-    except OAuthError as e:
-        # TEMP: surface the exact OAuth error to diagnose prod login.
-        from fastapi.responses import PlainTextResponse
-        return PlainTextResponse(f"OAuth error: {e.error} — {getattr(e, 'description', '')}", status_code=400)
+    except OAuthError:
+        # State mismatch / stale or reused login link → don't 500. Send them back
+        # to log in again (a fresh /auth/login clears state and issues a new one).
+        return RedirectResponse(FRONTEND_URL)
 
     # Use that token to call GitHub's API and fetch the logged-in user's profile.
     resp = await oauth.github.get("user", token=token)

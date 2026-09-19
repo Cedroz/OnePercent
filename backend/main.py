@@ -64,11 +64,15 @@ app.add_middleware(
 # os.getenv (not os.environ[...]) so a missing var doesn't crash the app on boot.
 # Locally these come from .env; in production they'd come from Vercel's dashboard.
 # The fallback secret is only a dev placeholder — real auth in prod needs a real one.
+_on_vercel = bool(os.getenv("VERCEL"))
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.getenv("SESSION_SECRET", "dev-only-insecure-placeholder"),
-    same_site="lax",                        # same-origin flow (dev proxy / prod rewrite)
-    https_only=bool(os.getenv("VERCEL")),   # Secure cookie in prod (Vercel sets VERCEL=1)
+    # Prod: the OAuth callback returns cross-site (github.com → our domain), so the
+    # state cookie needs SameSite=None + Secure to be sent. Dev is http localhost,
+    # where None isn't allowed, so use lax there.
+    same_site="none" if _on_vercel else "lax",
+    https_only=_on_vercel,
 )
 
 # --- OAuth (GitHub) ---

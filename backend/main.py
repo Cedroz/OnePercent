@@ -140,10 +140,10 @@ async def callback(request: Request):
     # and gets back an access token. All the sensitive bits happen server-side.
     try:
         token = await oauth.github.authorize_access_token(request)
-    except OAuthError:
-        # State mismatch / stale or reused login link → don't 500. Send them back
-        # to log in again (a fresh /auth/login issues a new state and works).
-        return RedirectResponse(FRONTEND_URL)
+    except OAuthError as e:
+        # TEMP: surface the exact OAuth error to diagnose prod login.
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(f"OAuth error: {e.error} — {getattr(e, 'description', '')}", status_code=400)
 
     # Use that token to call GitHub's API and fetch the logged-in user's profile.
     resp = await oauth.github.get("user", token=token)

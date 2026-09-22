@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import random
 from urllib.parse import quote_plus
@@ -16,9 +17,42 @@ MODEL = "gemini-3.6-flash"
 _key = os.getenv("GEMINI_API_KEY")
 client = genai.Client(api_key=_key) if _key else None
 
-# Transient Gemini failures we should retry (overloaded / rate-limited / gateway),
-# rather than letting a one-off blip kill a whole generation.
-_RETRYABLE = {429, 500, 502, 503, 504}
+# Transient Gemini failures we should retry (overloaded / gateway), rather than
+# letting a one-off blip kill a whole generation.
+_RETRYABLE = {500, 502, 503, 504}
+
+# A 429 is only worth retrying when it's a short per-minute throttle. A DAILY quota
+# can't be waited out inside a request, and on the free tier it's small (20/day per
+# model) — every retry spends another request from it, so retrying a daily-quota 429
+# burns the remaining budget 4x per failure for nothing.
+_MAX_RETRY_AFTER = 30.0   # seconds; a hint longer than this isn't worth holding for
+
+
+def _error_details(e):
+    # google-genai puts the raw error body on .details as {"error": {..., "details": [...]}}.
+    return (getattr(e, "details", None) or {}).get("error", {}).get("details", []) or []
+
+
+def _is_daily_quota(e):
+    # A QuotaFailure violation names the quota it broke, e.g.
+    # "GenerateRequestsPerDayPerProjectPerModel-FreeTier". Per-day means come back
+    # tomorrow, so there is nothing to retry.
+    for detail in _error_details(e):
+        for violation in detail.get("violations", []) or []:
+            if "PerDay" in str(violation.get("quotaId", "")):
+                return True
+    return False
+
+
+def _retry_after(e):
+    # Gemini returns a RetryInfo detail like {"retryDelay": "33s"} on a 429.
+    # Returns the delay in seconds, or None when the error carries no hint.
+    for detail in _error_details(e):
+        match = re.fullmatch(r"([\d.]+)s", str(detail.get("retryDelay", "")))
+        if match:
+            return float(match.group(1))
+    return None
+
 
 def _generate(prompt, config, attempts=4):
     # Call Gemini with exponential backoff + jitter on transient errors.
@@ -27,11 +61,21 @@ def _generate(prompt, config, attempts=4):
         try:
             return client.models.generate_content(model=MODEL, contents=prompt, config=config)
         except genai_errors.APIError as e:
-            # Not transient, or out of attempts → give up and let the caller handle it.
-            if getattr(e, "code", None) not in _RETRYABLE or i == attempts - 1:
+            code = getattr(e, "code", None)
+            wait = delay + random.uniform(0, 0.5)   # jitter avoids thundering-herd
+            if code == 429:
+                # Retry a short per-minute throttle; give up on a daily quota so we
+                # don't spend the rest of the day's budget on doomed attempts.
+                hint = _retry_after(e)
+                if _is_daily_quota(e) or hint is None or hint > _MAX_RETRY_AFTER:
+                    raise
+                wait = hint + random.uniform(0, 0.5)
+            elif code not in _RETRYABLE:
                 raise
-            time.sleep(delay + random.uniform(0, 0.5))   # jitter avoids thundering-herd
-            delay *= 2                                    # 1s → 2s → 4s
+            if i == attempts - 1:   # out of attempts → let the caller handle it
+                raise
+            time.sleep(wait)
+            delay *= 2              # 1s → 2s → 4s
 
 
 # The shape of ONE task the AI must produce. Gemini fills a list of these.

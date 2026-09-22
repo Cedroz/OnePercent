@@ -5,6 +5,7 @@ from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from sqlmodel import SQLModel, create_engine, Session, select
+from sqlalchemy import text
 from models import User, Task, PointsLog, Snapshot
 from crypto import encrypt_token, decrypt_token
 from leetcode import fetch_leetcode_stats, fetch_recent_ac, fetch_problem
@@ -22,6 +23,18 @@ engine = create_engine(DATABASE_URL) if DATABASE_URL else None
 
 def create_db_and_tables():
     SQLModel.metadata.create_all(engine)
+
+# The `user` table already exists in prod and there's no migration tool here,
+# so create_all() above won't add new columns to it. Add the rate-limit
+# columns idempotently on startup instead.
+def _ensure_schema():
+    if engine is None:
+        return
+    with engine.begin() as conn:
+        conn.execute(text('ALTER TABLE "user" ADD COLUMN IF NOT EXISTS goal_requested_at DOUBLE PRECISION'))
+        conn.execute(text('ALTER TABLE "user" ADD COLUMN IF NOT EXISTS goal_attempts_today INTEGER'))
+
+_ensure_schema()
 
 def save_user(github_id, access_token):
     with Session(engine) as session:
@@ -118,6 +131,41 @@ def replace_tasks(github_id, tasks):
                 leetcode_slug=t.get("leetcode_slug"),
             ))
         session.commit()
+
+
+# /api/goal calls Gemini (twice) per hit, so it needs its own limit beyond
+# "logged in" — otherwise a logged-in user (or a script with a valid session)
+# can hammer it and burn through the shared Gemini quota for everyone.
+GOAL_COOLDOWN_SECONDS = 30   # minimum gap between attempts
+GOAL_DAILY_LIMIT = 5         # attempts per Pacific calendar day
+
+def claim_goal_attempt(github_id):
+    # Records the attempt BEFORE calling Gemini (so failed/overloaded calls still
+    # count against the limit, not just successes) and reports whether it's allowed.
+    # Returns (allowed: bool, reason: "cooldown" | "daily_limit" | None).
+    now = time.time()
+    with Session(engine) as session:
+        user = session.exec(select(User).where(User.github_id == github_id)).first()
+        if user is None:
+            return False, "cooldown"
+
+        last = user.goal_requested_at
+        if last is not None and (now - last) < GOAL_COOLDOWN_SECONDS:
+            return False, "cooldown"
+
+        same_day = (
+            last is not None
+            and datetime.fromtimestamp(last, PACIFIC).date() == datetime.now(PACIFIC).date()
+        )
+        attempts_today = (user.goal_attempts_today or 0) + 1 if same_day else 1
+        if attempts_today > GOAL_DAILY_LIMIT:
+            return False, "daily_limit"
+
+        user.goal_requested_at = now
+        user.goal_attempts_today = attempts_today
+        session.add(user)
+        session.commit()
+        return True, None
 
 
 def set_goal_and_plan(github_id, goal):

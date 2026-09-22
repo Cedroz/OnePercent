@@ -2,7 +2,10 @@ import os
 import re
 import time
 import random
+from datetime import datetime, timedelta
 from urllib.parse import quote_plus
+from zoneinfo import ZoneInfo
+import httpx
 from dotenv import load_dotenv
 from google import genai
 from google.genai import errors as genai_errors
@@ -11,21 +14,25 @@ from leetcode import fetch_problem
 
 load_dotenv()
 
-MODEL = "gemini-3.6-flash"
+# Models to try, most preferred first. Free-tier quota is metered per model, so when
+# the top choice is spent for the day we can keep serving users on the next one down.
+MODELS = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"]
+# Cap how long any single request may hang. An overloaded model can sit on a request
+# for ~50s before finally returning 503, which alone outlasts the serverless function.
+# A real generation takes a second or two, so anything near this limit is a dead end
+# and we're better off failing fast and asking the next model.
+_REQUEST_TIMEOUT_MS = 15_000
+
 # Guard so importing this module doesn't crash if the key is missing (e.g. prod
 # not configured yet); the function fails at call time in that case.
 _key = os.getenv("GEMINI_API_KEY")
-client = genai.Client(api_key=_key) if _key else None
+client = genai.Client(
+    api_key=_key, http_options={"timeout": _REQUEST_TIMEOUT_MS}
+) if _key else None
 
 # Transient Gemini failures we should retry (overloaded / gateway), rather than
 # letting a one-off blip kill a whole generation.
 _RETRYABLE = {500, 502, 503, 504}
-
-# A 429 is only worth retrying when it's a short per-minute throttle. A DAILY quota
-# can't be waited out inside a request, and on the free tier it's small (20/day per
-# model) — every retry spends another request from it, so retrying a daily-quota 429
-# burns the remaining budget 4x per failure for nothing.
-_MAX_RETRY_AFTER = 30.0   # seconds; a hint longer than this isn't worth holding for
 
 
 def _error_details(e):
@@ -54,28 +61,104 @@ def _retry_after(e):
     return None
 
 
-def _generate(prompt, config, attempts=4):
-    # Call Gemini with exponential backoff + jitter on transient errors.
+# Model name -> unix time when it's worth trying again. A model that's out of daily
+# quota (or has been retired) stays skipped until then, so we go straight to one that
+# can actually answer instead of spending a round trip proving it can't.
+_unavailable_until = {}
+
+# Free-tier daily quotas roll over at midnight Pacific.
+_QUOTA_TZ = ZoneInfo("America/Los_Angeles")
+
+
+def _quota_reset_ts():
+    # Unix time of the next midnight Pacific.
+    now = datetime.now(_QUOTA_TZ)
+    midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return midnight.timestamp()
+
+
+def _usable_models():
+    now = time.time()
+    usable = [m for m in MODELS if _unavailable_until.get(m, 0) <= now]
+    # Everything is marked spent → try the whole list anyway. Our bookkeeping may be
+    # stale (quota reset early, key upgraded), and being wrong costs only a 429.
+    return usable or list(MODELS)
+
+
+# A model that's merely busy or short-window throttled gets a brief rest while we ask
+# the next one, rather than being written off for the day.
+_SOFT_COOLDOWN = 60.0     # seconds
+_RETIRED_COOLDOWN = 86400.0
+
+# Backstop on the whole chain. Per-request timeouts already bound a single sweep; this
+# only stops us starting *extra* sweeps when the clock has run on.
+_TIME_BUDGET = 45.0       # seconds per _generate call
+
+
+# What callers should catch: the AI couldn't answer, for a reason that's about the
+# service rather than the request. main.py turns this into a friendly 503.
+AI_UNAVAILABLE = (genai_errors.APIError, httpx.TimeoutException)
+
+
+def _cooldown_for(e):
+    # How long this model should sit out, or None if the error isn't one that another
+    # model could dodge (bad key, malformed request — every model fails identically).
+    if isinstance(e, httpx.TimeoutException):
+        return _SOFT_COOLDOWN       # sitting on the request; give someone else a turn
+    code = getattr(e, "code", None)
+    if _is_daily_quota(e):
+        return _quota_reset_ts() - time.time()      # spent; nothing until tomorrow
+    if code == 404:
+        return _RETIRED_COOLDOWN                    # retired, or not enabled for this key
+    if code == 429:
+        # Short-window throttle: rest it for as long as the server asks, within reason.
+        hint = _retry_after(e)
+        return min(hint, _SOFT_COOLDOWN) if hint else _SOFT_COOLDOWN
+    if code in _RETRYABLE:
+        return _SOFT_COOLDOWN                       # overloaded or a gateway blip
+    return None
+
+
+def _generate(prompt, config, sweeps=2):
+    # Sweep the model list, giving each one a single attempt before retrying any of
+    # them. Breadth first on purpose: when the preferred model is slow to fail, burning
+    # the time budget on retrying *it* would starve a healthy model further down.
+    deadline = time.time() + _TIME_BUDGET
+    last_error = None
     delay = 1.0
-    for i in range(attempts):
-        try:
-            return client.models.generate_content(model=MODEL, contents=prompt, config=config)
-        except genai_errors.APIError as e:
-            code = getattr(e, "code", None)
-            wait = delay + random.uniform(0, 0.5)   # jitter avoids thundering-herd
-            if code == 429:
-                # Retry a short per-minute throttle; give up on a daily quota so we
-                # don't spend the rest of the day's budget on doomed attempts.
-                hint = _retry_after(e)
-                if _is_daily_quota(e) or hint is None or hint > _MAX_RETRY_AFTER:
+    for sweep in range(sweeps):
+        for model in _usable_models():
+            # Every model gets one shot on the first sweep even if the clock is nearly
+            # gone: a healthy model usually answers in about a second, and skipping it
+            # because a *different* model hung would throw away the whole point of the
+            # fallback chain. Later sweeps are just retries, so those we do drop.
+            if sweep > 0 and time.time() >= deadline:
+                print("[planner] out of time; giving up before trying more models")
+                raise last_error
+            try:
+                resp = client.models.generate_content(model=model, contents=prompt, config=config)
+                _unavailable_until.pop(model, None)   # it's healthy; forget any old mark
+                return resp
+            except AI_UNAVAILABLE as e:
+                cooldown = _cooldown_for(e)
+                if cooldown is None:
                     raise
-                wait = hint + random.uniform(0, 0.5)
-            elif code not in _RETRYABLE:
-                raise
-            if i == attempts - 1:   # out of attempts → let the caller handle it
-                raise
-            time.sleep(wait)
-            delay *= 2              # 1s → 2s → 4s
+                _unavailable_until[model] = time.time() + cooldown
+                reason = getattr(e, "code", None) or type(e).__name__
+                print(f"[planner] {model} unavailable ({reason}); trying next model")
+                last_error = e
+        # Every model is parked past our deadline (all daily-spent, say) — another
+        # sweep would only collect the same rejections.
+        if all(_unavailable_until.get(m, 0) > deadline for m in MODELS):
+            break
+        # A whole sweep failed. Back off a little before going round again, in case the
+        # whole API is having a moment — but only if there's time left to be worth it.
+        wait = delay + random.uniform(0, 0.5)   # jitter avoids thundering-herd
+        if sweep == sweeps - 1 or time.time() + wait >= deadline:
+            break
+        time.sleep(wait)
+        delay *= 2
+    raise last_error     # nothing could serve us; caller turns this into a 503
 
 
 # The shape of ONE task the AI must produce. Gemini fills a list of these.

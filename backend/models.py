@@ -16,6 +16,10 @@ class User(SQLModel, table=True):
     leetcode_medium: int | None = None
     leetcode_hard: int | None = None
     leetcode_updated_at: float | None = None
+    # Rate-limiting for /api/goal (each call hits Gemini): last attempt time
+    # (any outcome) and how many attempts fall on that attempt's Pacific day.
+    goal_requested_at: float | None = None
+    goal_attempts_today: int | None = None
 
 
 class Task(SQLModel, table=True):

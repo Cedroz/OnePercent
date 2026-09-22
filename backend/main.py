@@ -31,6 +31,11 @@ CACHE_TTL = 3600
 # in production, Vercel injects these from its dashboard instead).
 load_dotenv()
 
+# Frontend and backend base URLs (used for redirects and cookie/security rules).
+# `FRONTEND_URL` is where the SPA is served; `BACKEND_URL` is where this API runs.
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+
 # `app` is the whole web application. FastAPI is an ASGI app object —
 # a server (uvicorn locally, Vercel in prod) imports this `app` and calls it
 # for every incoming request.
@@ -39,14 +44,15 @@ app = FastAPI()
 # --- CORS ---
 # Middleware is code that runs on EVERY request/response, wrapping your routes.
 # CORSMiddleware adds the "Access-Control-Allow-Origin" header that tells the
-# browser which frontend origins are allowed to read our responses.
-# Only these exact origins are permitted; anything else stays blocked.
+# browser which frontend origins are allowed to read our responses. We'll
+# include the configured `FRONTEND_URL` so production deployments work even if
+# the exact Vercel subdomain varies (e.g. one-percent-zeta).
 allowed_origins = [
+    FRONTEND_URL,
     "http://localhost:5173",   # Vite dev server (default port)
-    "http://127.0.0.1:5173",   # same server, other spelling of localhost
-    "http://localhost:5174",   # Vite falls back here if 5173 is taken
+    "http://127.0.0.1:5173",
+    "http://localhost:5174",
     "http://127.0.0.1:5174",
-    "https://one-percent-frontend.vercel.app",   # live Vercel frontend (production)
 ]
 
 app.add_middleware(
@@ -67,6 +73,13 @@ app.add_middleware(
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.getenv("SESSION_SECRET", "dev-only-insecure-placeholder"),
+    # In production the frontend and backend are on different origins (Vercel).
+    # Set SameSite=None and HTTPS-only so the browser accepts the session cookie
+    # when the frontend (a different origin) calls the API. This is required for
+    # cross-site OAuth flows where the cookie must be set by the backend and
+    # later sent by the browser on API requests.
+    same_site="none",
+    https_only=BACKEND_URL.startswith("https"),
 )
 
 # --- OAuth (GitHub) ---
@@ -113,7 +126,12 @@ def ping():
 async def login(request: Request):
     # Callback comes back through the frontend origin (Vite proxies it to us),
     # so the whole flow stays on ONE origin and the session cookie survives.
-    redirect_uri = "http://localhost:5173/auth/callback"
+    # Use the backend callback URL. GitHub must redirect to this BACKEND_URL
+    # callback (not the frontend), because static frontends (Vercel) cannot
+    # proxy the incoming callback request to the backend automatically.
+    # The backend will complete the handshake and then redirect the user to
+    # the frontend at `FRONTEND_URL`.
+    redirect_uri = f"{BACKEND_URL}/auth/callback"
     return await oauth.github.authorize_redirect(request, redirect_uri)
 
 

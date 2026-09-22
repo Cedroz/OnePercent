@@ -33,13 +33,15 @@ load_dotenv()
 
 # Frontend and backend base URLs (used for redirects and cookie/security rules).
 # `FRONTEND_URL` is where the SPA is served; `BACKEND_URL` is where this API runs.
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
 
 # Determine the backend URL to use for OAuth redirects and cookie rules.
 # Priority: explicit BACKEND_URL env (recommended) → VERCEL_URL (runtime) → localhost dev fallback.
 _explicit_backend = os.getenv("BACKEND_URL")
 if _explicit_backend:
-    BACKEND_URL = _explicit_backend
+    # Strip a trailing slash so redirect_uri ends up "…/auth/callback",
+    # not "…//auth/callback" (GitHub matches redirect_uri exactly).
+    BACKEND_URL = _explicit_backend.rstrip("/")
 else:
     _vercel = os.getenv("VERCEL_URL")
     if _vercel:
@@ -113,7 +115,7 @@ oauth.register(
 
 # Where to send the user after a successful login. Defaults to the local Vite
 # dev server; overridable via env var for production.
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
 
 
 # This decorator registers a route: "when a GET request hits /health, run this function."
@@ -138,14 +140,13 @@ def ping():
 # so the user's browser gets bounced to GitHub's "Authorize OnePercent?" page.
 @app.get("/auth/login")
 async def login(request: Request):
-    # Callback comes back through the frontend origin (Vite proxies it to us),
-    # so the whole flow stays on ONE origin and the session cookie survives.
-    # Use the backend callback URL. GitHub must redirect to this BACKEND_URL
-    # callback (not the frontend), because static frontends (Vercel) cannot
-    # proxy the incoming callback request to the backend automatically.
-    # The backend will complete the handshake and then redirect the user to
-    # the frontend at `FRONTEND_URL`.
-    redirect_uri = f"{BACKEND_URL}/auth/callback"
+    # Send GitHub back to the FRONTEND origin, not the backend. Vercel rewrites
+    # (frontend/vercel.json) transparently proxy /auth/* to this backend, so the
+    # browser never sees a different origin — same trick as the Vite dev proxy.
+    # That keeps the session cookie set by /auth/callback first-party (it would
+    # otherwise be a third-party cookie between two separate *.vercel.app sites
+    # and get dropped by Safari/Brave/Chrome).
+    redirect_uri = f"{FRONTEND_URL}/auth/callback"
     return await oauth.github.authorize_redirect(request, redirect_uri)
 
 

@@ -34,7 +34,21 @@ load_dotenv()
 # Frontend and backend base URLs (used for redirects and cookie/security rules).
 # `FRONTEND_URL` is where the SPA is served; `BACKEND_URL` is where this API runs.
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+
+# Determine the backend URL to use for OAuth redirects and cookie rules.
+# Priority: explicit BACKEND_URL env (recommended) → VERCEL_URL (runtime) → localhost dev fallback.
+_explicit_backend = os.getenv("BACKEND_URL")
+if _explicit_backend:
+    BACKEND_URL = _explicit_backend
+else:
+    _vercel = os.getenv("VERCEL_URL")
+    if _vercel:
+        # Vercel provides the deployment host (no scheme) in VERCEL_URL.
+        BACKEND_URL = f"https://{_vercel}"
+    else:
+        BACKEND_URL = "http://localhost:8000"
+
+print("[startup] BACKEND_URL=", BACKEND_URL)
 
 # `app` is the whole web application. FastAPI is an ASGI app object —
 # a server (uvicorn locally, Vercel in prod) imports this `app` and calls it

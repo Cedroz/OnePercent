@@ -1,8 +1,17 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 // In dev this is empty → relative URLs like "/api/me" (Vite proxies them).
 // In production it's the full backend URL (set in Vercel).
 const API_URL = import.meta.env.VITE_API_URL || ''
+
+// The Pacific calendar day (YYYY-MM-DD) a timestamp falls on. Plans roll over at
+// midnight PT, and the backend decides staleness by this same day boundary.
+function pacificDay(ms) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date(ms))
+}
 
 // A LeetCode problem link says "solve"; a YouTube tutorial search says "tutorial".
 function linkLabel(url) {
@@ -39,6 +48,10 @@ function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [now, setNow] = useState(Date.now())
   const [loading, setLoading] = useState(true)
+  const [rollingOver, setRollingOver] = useState(false)
+  // The Pacific day the dashboard is currently showing, so the ticking clock can
+  // notice when midnight PT passes with the page left open.
+  const shownDay = useRef(null)
 
   async function loadData() {
     const meRes = await fetch(`${API_URL}/api/me`, { credentials: 'include' })
@@ -90,9 +103,34 @@ function App() {
     }
   }
 
-  // Tick once a second so the "next refresh" countdown stays live.
+  // Midnight PT went by while the page sat open. loadData() asks the server to roll
+  // the plan over and then reloads, so yesterday's tasks are replaced by today's.
+  async function rollOverDay() {
+    setRollingOver(true)
+    try {
+      await loadData()
+      await syncProgress()
+    } finally {
+      setRollingOver(false)
+    }
+  }
+
+  // Tick once a second so the "next refresh" countdown stays live — and, when the
+  // countdown actually reaches zero, pull the new day's tasks instead of leaving
+  // yesterday's on screen until someone reloads the page.
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000)
+    // Record the starting day up front, not on the first tick — otherwise midnight
+    // passing in that first second would arm the check instead of triggering it.
+    shownDay.current = pacificDay(Date.now())
+    const id = setInterval(() => {
+      const ms = Date.now()
+      setNow(ms)
+      const day = pacificDay(ms)
+      if (day !== shownDay.current) {
+        shownDay.current = day
+        rollOverDay()
+      }
+    }, 1000)
     return () => clearInterval(id)   // cleanup: stop the timer if the component unmounts
   }, [])
 
@@ -106,7 +144,7 @@ function App() {
     }).formatToParts(new Date(now))
     const get = (t) => Number(parts.find((p) => p.type === t).value)
     const secsIntoDay = (get('hour') % 24) * 3600 + get('minute') * 60 + get('second')
-    let s = 86400 - secsIntoDay
+    let s = (86400 - secsIntoDay) % 86400
     const h = String(Math.floor(s / 3600)).padStart(2, '0')
     const m = String(Math.floor((s % 3600) / 60)).padStart(2, '0')
     s = String(s % 60).padStart(2, '0')
@@ -340,7 +378,9 @@ function App() {
 
             <div className="plan-bar">
               <span className="muted">
-                New tasks in <strong className="mono">{countdown() || '—'}</strong>
+                {rollingOver
+                  ? "Generating today's tasks…"
+                  : <>New tasks in <strong className="mono">{countdown() || '—'}</strong></>}
               </span>
               <button className="btn-change" onClick={() => setShowPlan((v) => !v)}>
                 {showPlan ? 'Hide plan' : 'View plan'}

@@ -14,4 +14,12 @@ export default defineConfig({
       '/auth': 'http://localhost:8000',
     },
   },
+  // Use React's automatic JSX runtime everywhere, so components render under
+  // vitest without each file importing React the way the old transform needed.
+  esbuild: { jsx: 'automatic' },
+  // Component tests run in jsdom so App.jsx can be rendered and driven headlessly.
+  test: {
+    environment: 'jsdom',
+    globals: false,
+  },
 })

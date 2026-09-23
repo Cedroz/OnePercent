@@ -28,7 +28,7 @@ jobs:
           pytest -v
 
   frontend:
-    name: Frontend build
+    name: Frontend tests & build
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -45,5 +45,8 @@ jobs:
       - name: Lint
         run: npm run lint
         continue-on-error: true   # advisory for now; build is the hard gate
+      - name: Test
+        run: npm test
+
       - name: Build
         run: npm run build
